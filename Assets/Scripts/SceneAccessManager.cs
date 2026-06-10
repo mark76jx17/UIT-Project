@@ -11,10 +11,20 @@ namespace MixedRealityProject
     /// so the very first launch guides the user through scanning the room.
     /// EffectMesh then turns floor/walls/ceiling into invisible colliders, so the
     /// physics ball stays contained by the real room instead of flying away.
+    ///
+    /// In the editor / Meta XR Simulator there is no Scene Model to read from the
+    /// device: if the device load yields no rooms, the demo room prefab assigned in
+    /// the Inspector is loaded instead, so EffectMesh can still build the room
+    /// through the exact same pipeline used on device.
     /// </summary>
     public class SceneAccessManager : MonoBehaviour
     {
         const string ScenePermission = "com.oculus.permission.USE_SCENE";
+
+#if UNITY_EDITOR
+        [Tooltip("Demo room loaded in the editor/simulator when no room data is available from the device.")]
+        [SerializeField] GameObject editorFallbackRoomPrefab;
+#endif
 
         void Start()
         {
@@ -44,6 +54,15 @@ namespace MixedRealityProject
             // captured on this device, MRUK opens the system Space Setup experience.
             var result = await MRUK.Instance.LoadSceneFromDevice(requestSceneCaptureIfNoDataFound: true);
             Debug.Log($"[SceneAccessManager] Room load result: {result}");
+
+#if UNITY_EDITOR
+            if (MRUK.Instance.Rooms.Count == 0 && editorFallbackRoomPrefab != null)
+            {
+                var fallbackResult = await MRUK.Instance.LoadSceneFromPrefab(editorFallbackRoomPrefab);
+                Debug.Log($"[SceneAccessManager] (Editor) Demo room fallback " +
+                          $"'{editorFallbackRoomPrefab.name}': {fallbackResult}");
+            }
+#endif
         }
     }
 }
