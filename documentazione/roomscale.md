@@ -321,3 +321,4 @@ OVRCameraRig in scena (o i Building Block Camera Rig + Passthrough), build targe
 | Data | Modifica |
 |---|---|
 | 2026-06-09 | Stesura iniziale. Aggiunti `MRUK`, `EffectMesh` (collider, hideMesh), script `SceneAccessManager`; `Sphere.Rigidbody` impostato su Continuous. Rimossa la dipendenza dal piano fittizio. |
+| 2026-06-10 | Debug visivo dei confini stanza: `EffectMesh.HideMesh` impostato a `false` — la geometria ricostruita (pareti, pavimento, soffitto, volumi mobili) è ora renderizzata in-app con `RoomBoxEffects.mat`, replicando la visualizzazione di Space Setup. Verificato su Quest 3S. Per tornare ai soli collider invisibili: rimettere `HideMesh = true`. |
