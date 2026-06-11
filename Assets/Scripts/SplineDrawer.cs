@@ -15,7 +15,7 @@ public class SplineDrawer : MonoBehaviour
     public float minKnotDistance = 0.1f;
 
     [Tooltip("Distanza dal piano di disegno rispetto alla camera")]
-    public float drawDepth = 5f;
+    public float drawDepth = 1.0f;
 
     [Tooltip("Lisciatura della spline (Catmull-Rom = auto-smooth)")]
     public bool autoSmooth = true;
@@ -72,12 +72,16 @@ public class SplineDrawer : MonoBehaviour
         _isDrawing = false;
     }
 
-    private void AddKnot(Vector3 position)
+    private void AddKnot(Vector3 worldPosition)
     {
-        float3 pos = new float3(position.x, position.y, position.z);
-        _points.Add(pos);
+        Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
 
-        BezierKnot knot = new BezierKnot(pos);
+        BezierKnot knot = new BezierKnot(new float3(
+            localPosition.x,
+            localPosition.y,
+            localPosition.z
+        ));
+
         _spline.Add(knot, autoSmooth ? TangentMode.AutoSmooth : TangentMode.Broken);
     }
 
