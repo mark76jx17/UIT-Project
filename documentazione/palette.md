@@ -33,7 +33,8 @@ Metafora della **tavolozza del pittore** (pattern Tilt Brush, vedi
 |---|---|---|
 | 1a | Shell: `PalettePanel` segnaposto ancorato al controller sinistro, posa da tarare | ✅ fatto (2026-06-12) |
 | 1b | Script `PaletteToggle`: tasto X mostra/nasconde, animazione scala, aptica, **visibile solo con controller sinistro in mano** | ✅ fatto (2026-06-12) |
-| 2 | Interazione: `PointableCanvasModule` + `ControllerPokeInteractor` destro + canvas pointable | da fare |
+| 2a | Interazione via ray: `EventSystem` + `PointableCanvasModule`, canvas pointable (`EmptyUIBackplateWithCanvas`) al posto del cubo, switch di prova | ✅ fatto (2026-06-12) |
+| 2b | Poke da controller destro (tocco diretto) — **già presente nel rig**, nessuna modifica | ✅ solo verifica (2026-06-12) |
 | 3 | Contenuto: swatch colori, Flexible Color Picker, slider dimensione/opacità, toggle strumenti | da fare |
 | 4 | `PaletteState`: stato (colore, dimensione, strumento) esposto con eventi C#, disaccoppiato dal futuro sistema di disegno | da fare |
 | 5 | Polish: aptica hover/press, suoni UI, test simulatore + Quest 3S | da fare |
@@ -56,8 +57,12 @@ Metafora della **tavolozza del pittore** (pattern Tilt Brush, vedi
   con switching automatico (`ControllerActiveState` / `HandActiveState`).
 - Sul lato destro esiste già `RightInteractions/Interactors/Controller/ControllerRayInteractor`
   (ray + grilletto): il fallback a distanza della Fase 2 è già coperto.
-- **Manca** un `ControllerPokeInteractor` sotto `Interactors/Controller` (solo ray) e
-  **manca** il `PointableCanvasModule` in scena → entrambi da aggiungere in Fase 2.
+- ~~**Manca** un `ControllerPokeInteractor` sotto `Interactors/Controller` (solo ray) e
+  **manca** il `PointableCanvasModule` in scena → entrambi da aggiungere in Fase 2.~~
+  **Correzione (2026-06-12, Fase 2b)**: il `ControllerPokeInteractor` esiste già in
+  `RightInteractions/Interactors/Controller and No Hand/` (la prima ricognizione aveva
+  guardato solo la sottocartella `Controller`), completo e registrato nel
+  `BestHoverInteractorGroup`. Solo il `PointableCanvasModule` andava aggiunto (fatto in 2a).
 - ⚠️ Il toggle con `OVRInput.Button.Three` (tasto X) funziona **solo con i controller**:
   in modalità hand-tracking la palette non sarà apribile (eventuale gesto in futuro).
 
@@ -163,6 +168,67 @@ visibile = isOpen (toggle col tasto X) && controller sinistro in mano
 
 ---
 
+## 2c. Fase 2a — Canvas pointable (implementata)
+
+Il cubo `PlaceholderVisual` è stato **eliminato** e sostituito da un canvas uGUI
+interagibile in VR. Nessun codice nuovo: solo assemblaggio di prefab del package
+`com.meta.xr.sdk.interaction` (Essentials).
+
+### Oggetti aggiunti
+
+```
+EventSystem                       (← NUOVO, root di scena)
+├── EventSystem                   (uGUI standard)
+└── PointableCanvasModule         (ISDK: instrada gli eventi dei pointer ISDK ai canvas uGUI)
+
+PalettePanel
+└── PaletteCanvas                 (← NUOVO: istanza di EmptyUIBackplateWithCanvas.prefab del UISet)
+    │   [PokeInteractable, RayInteractable, PointableCanvas, AudioSource,
+    │    PointableCanvasUnityEventWrapper, UIThemeManager — già nel prefab]
+    └── CanvasRoot                (Canvas world-space, scala 0.0005, HorizontalLayoutGroup)
+        ├── UIBackplate           (sfondo arrotondato; VerticalLayoutGroup, Mask)
+        │   ├── GradientEffect
+        │   └── TestToggle        (← NUOVO: ToggleButton_Switch.prefab — controllo di verifica)
+        └── ISDK_PokeInteraction
+            └── Surface           (PlaneSurface + ClippedPlaneSurface + BoundsClipper,
+                                   anchor stretch → segue la dimensione del canvas)
+```
+
+### Scelte e valori
+
+| Cosa | Valore/Scelta | Motivazione |
+|---|---|---|
+| Prefab base | `UISet/Prefabs/Backplate/EmptyUIBackplateWithCanvas` | unico prefab del UISet con **tutto il ponte già montato**: PointableCanvas + PokeInteractable + RayInteractable + superfici (il `FlatUnityCanvas` di Props non ha il RayInteractable) |
+| Dimensione | `sizeDelta 400×300` su `CanvasRoot` **e** `UIBackplate` | a scala 0.0005 = **20×15 cm**, l'ingombro validato in Fase 1a. Va impostata su entrambi: l'`HorizontalLayoutGroup` di CanvasRoot ha `childControlWidth/Height = false`, quindi posiziona i figli ma **non** li ridimensiona |
+| `Surface` | non toccata | anchor `(0,0)-(1,1)` stretch + `RectTransformBoundsClipperDriver`: l'area interattiva segue da sola il canvas |
+| `TestToggle` | figlio di **UIBackplate** (non di CanvasRoot) | i figli diretti di CanvasRoot vengono affiancati dall'HorizontalLayoutGroup come "pannelli"; il contenuto va dentro il backplate, che ha il VerticalLayoutGroup |
+| `PaletteToggle.content` | ora punta a `PaletteCanvas` | il toggle col tasto X spegne/accende il canvas intero (interazione compresa) |
+| `EventSystem` | GameObject root con `EventSystem` + `PointableCanvasModule` | il modulo ISDK sostituisce lo StandaloneInputModule; senza di esso i PointableCanvas non ricevono eventi. Ne serve **uno solo** per scena |
+
+> ⚠️ **Gotcha tooling**: istanziando un prefab uGUI sotto un canvas scalato (0.0005),
+> il tool MCP compensa la trasformazione world → il `TestToggle` è nato con scala
+> locale 2000 e rotazione 270°. Sempre rimettere local pos/rot/scale a (0,0,0)/(1,1,1)
+> dopo l'instanziazione sotto canvas.
+
+### Come funziona l'interazione (Fase 2a = solo ray)
+
+`RightInteractions/Interactors/Controller/ControllerRayInteractor` (già nel rig) →
+`RayInteractable` del canvas → `PointableCanvas` converte il punto di contatto in
+coordinate canvas → `PointableCanvasModule` lo trasforma in normali eventi uGUI
+(hover/click) → il `Toggle` di TestToggle scatta come se fosse cliccato col mouse.
+
+### Fase 2b — poke da controller: già nel rig
+
+Il tocco diretto con la punta del controller destro passa da
+`RightInteractions/Interactors/Controller and No Hand/ControllerPokeInteractor`
+(`PokeInteractor` + `ControllerRef` + `ActiveStateTracker`), già registrato nel
+`BestHoverInteractorGroup` di `Interactors` insieme al ray. Il gruppo arbitra
+automaticamente: vicino al pannello vince il poke, a distanza il ray.
+`PokeInteractable` e `Surface` del canvas erano già pronti dalla 2a → **nessuna
+modifica necessaria**, solo verifica su device.
+
+---
+
 ## 3. Verifica della Fase 1a (build & run)
 
 Su Quest (o simulatore con controller emulati):
@@ -191,4 +257,6 @@ della rotazione (90 ± offset).
 | 2026-06-12 | **Fase 1a.** Creati `PalettePanel` (vuoto, figlio di `LeftControllerAnchor`, pos `(0, 0.10, -0.02)`, rot `(-30, 0, 0)`) e `PlaceholderVisual` (cubo 20×15×0,5 cm, collider rimosso, material `PalettePlaceholder.mat` nuovo in `Assets/Materials/`). Nessun codice. Posa da tarare in build. |
 | 2026-06-12 | **Fase 1a — revisione posa** dopo feedback utente: `PalettePanel` ora **parallelo alla faccia nera del controller** (rot `(90, 0, 0)`) e ~5 cm sopra di essa (pos `(0, 0.05, 0)`). Aggiunto requisito alla Fase 1b: palette visibile **solo con controller sinistro in mano** (la visibilità avrà un unico proprietario, lo script `PaletteToggle`: `visibile = apertaConTastoX && controllerInMano`). Posa verificata su Quest 3S. Commit `4dc2986`. |
 | 2026-06-12 | **Fase 1b.** Nuovo script `Assets/Scripts/PaletteToggle.cs` su `PalettePanel`: toggle col tasto X (solo con controller in mano), visibilità vincolata a `ControllerActiveState` del rig, animazione di scala 0.15 s, impulso aptico 40 ms al toggle. Riferimenti cablati in scena (`content` = `PlaceholderVisual`, `leftControllerActive` = `LeftInteractions`). |
-| 2026-06-12 | **Fase 1b — fix tasto X.** In build il toggle non scattava: `GetDown(Button.Three, LTouch)` non mappa sulla X (con `LTouch` la X è `Button.One`; `Button.Three` vale solo su `Controller.Touch`). Sostituito con `OVRInput.GetDown(OVRInput.RawButton.X)` (tasto fisico, non ambiguo). |
+| 2026-06-12 | **Fase 1b — fix tasto X.** In build il toggle non scattava: `GetDown(Button.Three, LTouch)` non mappa sulla X (con `LTouch` la X è `Button.One`; `Button.Three` vale solo su `Controller.Touch`). Sostituito con `OVRInput.GetDown(OVRInput.RawButton.X)` (tasto fisico, non ambiguo). Verificato su Quest 3S. |
+| 2026-06-12 | **Fase 2a.** Eliminato `PlaceholderVisual`; aggiunti `EventSystem`+`PointableCanvasModule` (root) e `PaletteCanvas` (istanza `EmptyUIBackplateWithCanvas`) sotto `PalettePanel`, ridimensionato a 400×300 px (= 20×15 cm a scala 0.0005, su CanvasRoot **e** UIBackplate). `TestToggle` (`ToggleButton_Switch`) dentro UIBackplate come controllo di verifica. `PaletteToggle.content` → `PaletteCanvas`. Interazione attesa via `ControllerRayInteractor` destro esistente; poke in Fase 2b. Verificata su Quest 3S (ray + grilletto). |
+| 2026-06-12 | **Fase 2b.** Nessuna modifica: il `ControllerPokeInteractor` destro esiste già nel rig (`Interactors/Controller and No Hand/`), registrato nel `BestHoverInteractorGroup`. Corretta la ricognizione iniziale in §1. Da verificare su device il tocco diretto sul `TestToggle`. |
