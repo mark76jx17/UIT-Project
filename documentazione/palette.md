@@ -32,7 +32,7 @@ Metafora della **tavolozza del pittore** (pattern Tilt Brush, vedi
 | Fase | Contenuto | Stato |
 |---|---|---|
 | 1a | Shell: `PalettePanel` segnaposto ancorato al controller sinistro, posa da tarare | ✅ fatto (2026-06-12) |
-| 1b | Script `PaletteToggle`: tasto X mostra/nasconde, animazione scala, aptica, **visibile solo con controller sinistro in mano** | da fare |
+| 1b | Script `PaletteToggle`: tasto X mostra/nasconde, animazione scala, aptica, **visibile solo con controller sinistro in mano** | ✅ fatto (2026-06-12) |
 | 2 | Interazione: `PointableCanvasModule` + `ControllerPokeInteractor` destro + canvas pointable | da fare |
 | 3 | Contenuto: swatch colori, Flexible Color Picker, slider dimensione/opacità, toggle strumenti | da fare |
 | 4 | `PaletteState`: stato (colore, dimensione, strumento) esposto con eventi C#, disaccoppiato dal futuro sistema di disegno | da fare |
@@ -118,6 +118,51 @@ Verrà **sostituito** dal canvas reale (FlatUnityCanvas + UI Set) in Fase 2.
 
 ---
 
+## 2b. Fase 1b — Script `PaletteToggle` (implementata)
+
+`Assets/Scripts/PaletteToggle.cs`, componente su `PalettePanel`. È l'**unico
+proprietario** della visibilità del pannello:
+
+```
+visibile = isOpen (toggle col tasto X) && controller sinistro in mano
+```
+
+### Funzionamento
+
+- **Tasto X** = `OVRInput.GetDown(OVRInput.RawButton.X)`, accettato solo se il
+  controller è in mano. Al toggle: breve impulso aptico (`SetControllerVibration`,
+  40 ms) sul controller sinistro.
+  > ⚠️ **Gotcha OVRInput**: `Button.Three` corrisponde alla X solo interrogando la
+  > coppia combinata (`Controller.Touch`); con `Controller.LTouch` la mappatura è
+  > per-controller e la X diventa `Button.One`. La prima versione usava
+  > `GetDown(Button.Three, LTouch)` e non scattava mai. `RawButton.X` indica il
+  > tasto fisico senza ambiguità.
+- **Controller in mano** = `ControllerActiveState.Active` (componente del rig su
+  `LeftInteractions`, `Active => Controller.IsConnected`): è lo stesso stato con cui
+  il rig accende/spegne interactor e visual del controller. Posando il controller e
+  passando alle mani la palette sparisce da sola; riprendendolo, riappare se era aperta.
+- **Animazione**: `visibility` 0↔1 con `Mathf.MoveTowards` in `Update`
+  (`animationDuration` = 0.15 s, regolabile da Inspector), applicata come
+  `localScale` di `PalettePanel`.
+
+### Dettagli di implementazione
+
+| Scelta | Motivazione |
+|---|---|
+| La scala non scende mai a 0 esatto e `PalettePanel` non viene mai disattivato | lo script vive su `PalettePanel`: se disattivasse il proprio GameObject, `Update` smetterebbe di girare e il toggle morirebbe |
+| Il figlio `content` (= `PlaceholderVisual`, poi il canvas) viene disattivato a `visibility == 0` | niente rendering/raycast residui dal pannello "chiuso" a scala microscopica |
+| Stato iniziale `isOpen = true` | all'avvio la palette è visibile appena il controller è in mano |
+
+### Riferimenti serializzati (cablati in scena)
+
+| Campo | Valore |
+|---|---|
+| `content` | `PlaceholderVisual` |
+| `leftControllerActive` | `ControllerActiveState` su `LeftInteractions` |
+| `animationDuration` | `0.15` |
+
+---
+
 ## 3. Verifica della Fase 1a (build & run)
 
 Su Quest (o simulatore con controller emulati):
@@ -144,4 +189,6 @@ della rotazione (90 ± offset).
 | Data | Modifica |
 |---|---|
 | 2026-06-12 | **Fase 1a.** Creati `PalettePanel` (vuoto, figlio di `LeftControllerAnchor`, pos `(0, 0.10, -0.02)`, rot `(-30, 0, 0)`) e `PlaceholderVisual` (cubo 20×15×0,5 cm, collider rimosso, material `PalettePlaceholder.mat` nuovo in `Assets/Materials/`). Nessun codice. Posa da tarare in build. |
-| 2026-06-12 | **Fase 1a — revisione posa** dopo feedback utente: `PalettePanel` ora **parallelo alla faccia nera del controller** (rot `(90, 0, 0)`) e ~5 cm sopra di essa (pos `(0, 0.05, 0)`). Aggiunto requisito alla Fase 1b: palette visibile **solo con controller sinistro in mano** (la visibilità avrà un unico proprietario, lo script `PaletteToggle`: `visibile = apertaConTastoX && controllerInMano`). |
+| 2026-06-12 | **Fase 1a — revisione posa** dopo feedback utente: `PalettePanel` ora **parallelo alla faccia nera del controller** (rot `(90, 0, 0)`) e ~5 cm sopra di essa (pos `(0, 0.05, 0)`). Aggiunto requisito alla Fase 1b: palette visibile **solo con controller sinistro in mano** (la visibilità avrà un unico proprietario, lo script `PaletteToggle`: `visibile = apertaConTastoX && controllerInMano`). Posa verificata su Quest 3S. Commit `4dc2986`. |
+| 2026-06-12 | **Fase 1b.** Nuovo script `Assets/Scripts/PaletteToggle.cs` su `PalettePanel`: toggle col tasto X (solo con controller in mano), visibilità vincolata a `ControllerActiveState` del rig, animazione di scala 0.15 s, impulso aptico 40 ms al toggle. Riferimenti cablati in scena (`content` = `PlaceholderVisual`, `leftControllerActive` = `LeftInteractions`). |
+| 2026-06-12 | **Fase 1b — fix tasto X.** In build il toggle non scattava: `GetDown(Button.Three, LTouch)` non mappa sulla X (con `LTouch` la X è `Button.One`; `Button.Three` vale solo su `Controller.Touch`). Sostituito con `OVRInput.GetDown(OVRInput.RawButton.X)` (tasto fisico, non ambiguo). |
