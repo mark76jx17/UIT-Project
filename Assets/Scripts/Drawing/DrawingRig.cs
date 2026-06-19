@@ -5,28 +5,19 @@ namespace MixedRealityProject.Drawing
     /// <summary>
     /// Bootstrap del sistema di disegno: unico componente da aggiungere in scena
     /// (su un GameObject vuoto). Trova l'OVRCameraRig e monta il pennello sulla
-    /// mano destra e la palette sulla sinistra. Disabilita anche, se presenti,
-    /// i GameObject della vecchia palette UI (PalettePanel + sfera BrushTip
-    /// sul controller destro) e l'eventuale componente PaletteState legacy:
-    /// così la nuova palette procedurale può convivere in scena senza dover
-    /// editare manualmente la gerarchia esistente.
+    /// mano destra e la palette sulla sinistra; tutto il resto (pennello, palette
+    /// procedurale) è creato a runtime, quindi la scena non contiene UI di palette.
     /// </summary>
     public class DrawingRig : MonoBehaviour
     {
         [Tooltip("Per i mancini: pennello sulla mano sinistra, palette sulla destra.")]
         [SerializeField] bool leftHanded;
 
-        [Tooltip("Disabilita PalettePanel e BrushTip della vecchia palette UI al primo avvio.")]
-        [SerializeField] bool disableLegacyPalette = true;
-
         void Start()
         {
             StrokeSettings.BrushHand = leftHanded ? OVRInput.Controller.LTouch : OVRInput.Controller.RTouch;
             StrokeSettings.PaletteHand = leftHanded ? OVRInput.Controller.RTouch : OVRInput.Controller.LTouch;
             StrokeSettings.LoadRecentColors(); // ripristina i 5 colori recenti salvati
-
-            if (disableLegacyPalette)
-                DisableLegacyPalette();
 
             // Su Mac/editor senza runtime XR il rig può venire disattivato dal
             // Meta SDK: in quel caso si ripiega sulla camera principale
@@ -87,27 +78,6 @@ namespace MixedRealityProject.Drawing
                 palette.localEuler = Vector3.zero;
             }
 #endif
-        }
-
-        /// <summary>
-        /// La scena pushata su git contiene la vecchia palette UI (PaletteToggle
-        /// + PaletteState + PaletteFeedback su un Canvas) e una sfera BrushTip
-        /// di anteprima colore sul controller destro: tutto sostituito dalla
-        /// palette procedurale e dal BrushController della nuova logica di
-        /// disegno. Disabilito le radici, non li cancello, così se serve si
-        /// possono riattivare a mano senza ri-cablare i riferimenti nella scena.
-        /// </summary>
-        void DisableLegacyPalette()
-        {
-            var legacyToggle = FindAnyObjectByType<PaletteToggle>(FindObjectsInactive.Include);
-            if (legacyToggle != null)
-                legacyToggle.gameObject.SetActive(false);
-
-            // La vecchia sfera BrushTip (anteprima colore) è un Renderer figlio
-            // del controller destro: il namespace è quello di root, non Drawing.
-            var legacyTip = FindAnyObjectByType<MixedRealityProject.BrushTip>(FindObjectsInactive.Include);
-            if (legacyTip != null)
-                legacyTip.gameObject.SetActive(false);
         }
     }
 }

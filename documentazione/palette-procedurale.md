@@ -138,3 +138,80 @@ uGUI (attiva in edit mode) durante il preview e la ripristina su *Clear*.
 striscia a destra; leggibilità generale; che il fix sorting tenga anche in build URP/Quest
 (in passthrough). Le icone azione (Undo/Redo/Save/Load) sono un po' strette
 icona+testo: se in VR risultano affollate, ridurre il font o l'icona di quella riga.
+
+---
+
+## 3. Recupero — conflitto di merge non risolto (2026-06-19)
+
+Dopo un push `Palette → main`, all'apertura Unity partiva in **Safe Mode** con due errori
+e l'MCP non si avviava:
+
+```
+DrawingRig.cs(102): CS0246 — 'PaletteToggle' could not be found
+DrawingRig.cs(108): CS0234 — 'BrushTip' does not exist in namespace 'MixedRealityProject'
+```
+
+**Causa radice.** Un `git stash pop` in conflitto era stato **committato con i marcatori
+dentro** (commit `46f5c2f`):
+
+- `Assets/Scenes/SampleScene.unity` conteneva **123 righe di marcatori** di conflitto
+  (`<<<<<<< Updated upstream` / `=======` / `>>>>>>> Stashed changes`) → YAML invalido.
+  Il lato *Stashed changes* re-introduceva la vecchia palette uGUI (PaletteToggle /
+  PaletteState / PaletteFeedback / PalettePanel), ormai rimossa dal codice su `main`.
+- `DrawingRig.DisableLegacyPalette()` referenziava quei tipi legacy inesistenti su `main`
+  (`PaletteToggle` e il `MixedRealityProject.BrushTip` di root, diverso dal nuovo
+  `MixedRealityProject.Drawing.BrushTip`) → non compilava → Safe Mode → MCP bloccato.
+
+**Risoluzione.**
+
+- **Scena**: risolto il conflitto tenendo **sempre il lato `Updated upstream`** (lo stato
+  pulito di `main`). Risultato: 2464 righe, 0 marcatori, header YAML corretto, `DrawingRig`
+  conservato (è nella parte comune, fuori dai conflitti), nessun oggetto palette legacy.
+  Coincide con la baseline stabile `ab4c53d` + il GameObject `DrawingRig`.
+- **`DrawingRig.cs`**: rimosso `DisableLegacyPalette()`, il campo `disableLegacyPalette`
+  e la chiamata in `Start()`. Era codice morto: con la scena pulita non c'è più nessun
+  oggetto legacy da disabilitare, e referenziava tipi inesistenti.
+
+**Nessuna perdita del lavoro di ieri**: tutto il sistema di disegno e la palette procedurale
+sono codice (committato e intatto in `46f5c2f`) costruito a runtime da `DrawingRig`; la scena
+deve solo contenere il GameObject bootstrap, che è stato preservato. Solo la palette uGUI
+legacy (già deprecata) è stata definitivamente eliminata dalla scena.
+
+`Assets/_Recovery/0.unity` è una scena minimale di recovery di Unity **senza** `DrawingRig`:
+non è la scena buona, si può eliminare.
+
+**Da verificare**: riaprire Unity in modalità normale → compilazione pulita, niente Safe Mode,
+MCP che si avvia, e la scena che apre senza componenti "missing script".
+
+### Fix runtime — TMP fontMaterial null in `MakeLabel` (2026-06-19)
+
+Dopo il recupero, in Play (simulatore) la palette mostrava **solo ruota colori + slider
+luminosità**, mancavano tutti i button. Causa (da `Editor.log`):
+
+```
+ArgumentNullException: Value cannot be null. Parameter name: source
+  at TMPro.TMP_Text.get_fontMaterial ()
+  at PaletteController.MakeLabel ()       PaletteController.cs:399
+  at PaletteController.MakeToggleButton () PaletteController.cs:329
+  at PaletteController.BuildPanel ()       PaletteController.cs:213
+```
+
+`BuildPanel()` costruisce ruota + slider luminosità, poi al primo testo TMP
+(`MakeToggleButton` → `MakeLabel`) la riga `tmp.fontMaterial.renderQueue = QueueText`
+(introdotta nel fix sorting dello Step 3, mai testato in editor — vedi "da verificare su
+device") accedeva a `fontMaterial` quando il material condiviso del font non era ancora
+inizializzato → `CreateMaterialInstance(null)` → eccezione che **abortisce l'intera
+BuildPanel**, facendo sparire tutto ciò che viene dopo il primo testo.
+
+**Fix** (`MakeLabel`): assegnare un font valido (`TMP_Settings.defaultFontAsset`) se
+mancante, e impostare `fontMaterial.renderQueue` solo se `fontSharedMaterial != null`.
+Così non lancia mai e la palette si costruisce per intero. **Da ritestare in Play.**
+
+### Test interazione nel simulatore (2026-06-19)
+
+Il Meta XR Simulator gira **dentro l'editor**, quindi `#if UNITY_EDITOR` è attivo: con
+`pinPaletteInEditor = true` la palette veniva staccata dalla mano e pinnata davanti alla
+camera (`PlacePaletteForEditor`), comodo per guardarla ma non per provare l'interazione
+reale. Default cambiato a **`pinPaletteInEditor = false`** così nel simulatore la palette
+resta **sulla mano-palette** (sinistra), come sul device. La palette si avvia già aperta
+(`isOpen = true`); il trigger della mano-palette la apre/chiude.

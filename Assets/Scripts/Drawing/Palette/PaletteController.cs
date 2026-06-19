@@ -23,7 +23,7 @@ namespace MixedRealityProject.Drawing
         public float heightAboveHand = 0.15f;
 
 #if UNITY_EDITOR
-        [SerializeField] bool pinPaletteInEditor = true;
+        [SerializeField] bool pinPaletteInEditor = false;
         [SerializeField] float editorDistance = 0.72f;
         [SerializeField] Vector3 editorOffset = new(0.0f, 0f, 0f);
         [SerializeField] float editorScale = 1.25f;
@@ -396,7 +396,15 @@ namespace MixedRealityProject.Drawing
             tmp.enableWordWrapping = false;
             tmp.overflowMode = TextOverflowModes.Overflow;
             tmp.rectTransform.sizeDelta = box;
-            tmp.fontMaterial.renderQueue = QueueText;
+            // Appena creato via AddComponent, il TextMeshPro può non avere ancora font e
+            // material condiviso inizializzati: accedere a tmp.fontMaterial creerebbe
+            // un'istanza da una source null → ArgumentNullException che abortisce l'intera
+            // BuildPanel (e fa sparire tutti i controlli dopo il primo testo). Garantisco
+            // un font valido e imposto la render queue solo se il material è disponibile.
+            if (tmp.font == null)
+                tmp.font = TMP_Settings.defaultFontAsset;
+            if (tmp.fontSharedMaterial != null)
+                tmp.fontMaterial.renderQueue = QueueText;
         }
     }
 }
