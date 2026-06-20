@@ -180,8 +180,8 @@ namespace MixedRealityProject.Drawing
             panel = new GameObject("Panel");
             panel.transform.SetParent(transform, false);
 
-            var panelSize = new Vector2(0.34f, 0.34f);
-            const float pad = 0.018f, rowGap = 0.012f, colGap = 0.012f, z = -0.002f;
+            var panelSize = new Vector2(0.32f, 0.56f);
+            const float pad = 0.018f, rowGap = 0.010f, colGap = 0.012f, z = -0.002f;
 
             MakeRounded(panel.transform, "MainPanel", Vector3.zero, panelSize, 0.020f, PanelColor, QueuePanel);
 
@@ -189,11 +189,11 @@ namespace MixedRealityProject.Drawing
 
             var layout = new PaletteLayout(panelSize, pad, rowGap, colGap, z);
 
-            // ----- riga colore: ruota + luminosità (sx) | Pressure/Mirror impilati (dx) -----
-            var colorRow = layout.Row(0.10f);
-            var wheelCell = colorRow.Left(0.10f);
-            var brightCell = colorRow.Left(0.016f);
-            var toggleRegion = colorRow.Fill();
+            // ---------- COLOR ----------
+            var colorRow = layout.Row(0.115f);
+            var wheelCell = colorRow.Left(0.115f);
+            var brightCell = colorRow.Left(0.020f);
+            var brightLabelCell = colorRow.Fill();
 
             var wheel = new GameObject("ColorWheel");
             wheel.transform.SetParent(panel.transform, false);
@@ -203,43 +203,40 @@ namespace MixedRealityProject.Drawing
             colorWheel.SetProximityTarget(Brush != null ? Brush.Tip : null);
             SetQueue(wheel, QueueControl);
 
+            MakeLabel(panel.transform, "Brightness", brightLabelCell.Center,
+                brightLabelCell.Size, SectionFont, TextAlignmentOptions.Left);
+
             var bright = new GameObject("BrightnessSlider");
             bright.transform.SetParent(panel.transform, false);
             bright.transform.localPosition = brightCell.Center;
-            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.018f, brightCell.Size.y * 0.92f));
+            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.018f, brightCell.Size.y * 0.95f));
             SetQueue(bright, QueueControl);
+            layout.Gap(0.007f);
 
-            var toggles = toggleRegion.StackV(2, 0.014f);
-            MakeToggleButton("Pressure", toggles[0],
-                () => StrokeSettings.SizeMode == SizeMode.PressureBrush,
-                () => StrokeSettings.SizeMode = StrokeSettings.SizeMode == SizeMode.PressureBrush
-                    ? SizeMode.FixedPen : SizeMode.PressureBrush);
-            MakeToggleButton("Mirror", toggles[1],
-                () => Mirror.Enabled,
-                () => Mirror.Toggle(Camera.main != null ? Camera.main.transform : transform));
-
-            // ----- colori recenti -----
             var recentRow = layout.Row(0.030f);
-            var recentLabel = recentRow.Left(0.058f);
-            MakeLabel(panel.transform, "recenti", recentLabel.Center, recentLabel.Size, SectionFont, TextAlignmentOptions.Left);
+            var recentLabel = recentRow.Left(0.090f);
+            MakeLabel(panel.transform, "Recent", recentLabel.Center,
+                recentLabel.Size, SectionFont, TextAlignmentOptions.Left);
+
             recentSwatches = new Renderer[5];
             for (int i = 0; i < 5; i++)
             {
                 int idx = i;
-                var c = recentRow.Left(recentRow.Height);
-                var sw = MakeRoundedButton(panel.transform, $"Recent{i}", c.Center, c.Size, 0.006f, EmptySwatch,
-                    () =>
+                var c = recentRow.Left(0.026f);
+                var sw = MakeRoundedButton(panel.transform, $"Recent{i}", c.Center, c.Size,
+                    0.006f, EmptySwatch, () =>
                     {
                         var r = StrokeSettings.RecentColors;
                         if (idx < r.Count) StrokeSettings.SetColor(r[idx]);
                     });
                 recentSwatches[i] = sw.GetComponent<Renderer>();
             }
+            layout.Gap(0.007f);
 
-            // ----- trasparenza (slider) -----
-            var alphaRow = layout.Row(0.022f);
-            var alphaLabel = alphaRow.Left(0.105f);
-            MakeLabel(panel.transform, "transparency", alphaLabel.Center, alphaLabel.Size, SectionFont, TextAlignmentOptions.Left);
+            var alphaRow = layout.Row(0.026f);
+            MakeLabel(panel.transform, "Transparency", alphaRow.Left(0.105f).Center,
+                new Vector2(0.105f, 0.026f), SectionFont, TextAlignmentOptions.Left);
+
             var alphaCell = alphaRow.Fill();
             var alpha = new GameObject("AlphaSlider");
             alpha.transform.SetParent(panel.transform, false);
@@ -247,17 +244,26 @@ namespace MixedRealityProject.Drawing
             alpha.AddComponent<AlphaSlider>().Build(new Vector2(alphaCell.Size.x, 0.012f));
             SetQueue(alpha, QueueControl);
 
-            // ----- strumenti Draw / Fill / Erase -----
-            var toolsRow = layout.Row(0.034f);
-            var toolCells = toolsRow.Split(3);
-            penButton = MakeTextButton("Draw", "pencil", toolCells[0], () => StrokeSettings.Tool = ToolMode.Pen, ButtonFont);
-            fillButton = MakeTextButton("Fill", "droplet", toolCells[1], () => StrokeSettings.Tool = ToolMode.Fill, ButtonFont);
-            eraserButton = MakeTextButton("Erase", "eraser", toolCells[2], () => StrokeSettings.Tool = ToolMode.Eraser, ButtonFont);
+            // separator
+            layout.Gap(0.008f);
+            MakeRounded(panel.transform, "Sep1",
+                new Vector3(0f, layout.Cursor, z),
+                new Vector2(panelSize.x - pad * 2f, 0.002f),
+                0.001f, TrackColor, QueueControl);
+            layout.Gap(0.022f);
 
-            // ----- spessore (slider) -----
-            var sizeRow = layout.Row(0.022f);
-            var sizeLabel = sizeRow.Left(0.045f);
-            MakeLabel(panel.transform, "size", sizeLabel.Center, sizeLabel.Size, SectionFont, TextAlignmentOptions.Left);
+
+            // ---------- BRUSH ----------
+            var pressureRow = layout.Row(0.034f);
+            MakeToggleButton("Pressure", pressureRow.Fill(),
+                () => StrokeSettings.SizeMode == SizeMode.PressureBrush,
+                () => StrokeSettings.SizeMode = StrokeSettings.SizeMode == SizeMode.PressureBrush
+                    ? SizeMode.FixedPen : SizeMode.PressureBrush);
+
+            var sizeRow = layout.Row(0.028f);
+            MakeLabel(panel.transform, "Size", sizeRow.Left(0.060f).Center,
+                new Vector2(0.060f, 0.028f), SectionFont, TextAlignmentOptions.Left);
+
             var sizeCell = sizeRow.Fill();
             var size = new GameObject("SizeSlider");
             size.transform.SetParent(panel.transform, false);
@@ -265,8 +271,43 @@ namespace MixedRealityProject.Drawing
             size.AddComponent<SizeSlider>().Build(new Vector2(sizeCell.Size.x, 0.012f));
             SetQueue(size, QueueControl);
 
-            // ----- Undo / Redo / Save / Load -----
-            var actionRow = layout.Row(0.030f);
+            // separator
+            layout.Gap(0.012f);
+            MakeRounded(panel.transform, "Sep2",
+                new Vector3(0f, layout.Cursor, z),
+                new Vector2(panelSize.x - pad * 2f, 0.002f),
+                0.001f, TrackColor, QueueControl);
+            layout.Gap(0.022f);
+
+
+            // ---------- TOOL ----------
+            var toolsRow = layout.Row(0.038f);
+            var toolCells = toolsRow.Split(3);
+            penButton = MakeTextButton("Draw", "pencil", toolCells[0],
+                () => StrokeSettings.Tool = ToolMode.Pen, ButtonFont);
+            fillButton = MakeTextButton("Fill", "droplet", toolCells[1],
+                () => StrokeSettings.Tool = ToolMode.Fill, ButtonFont);
+            eraserButton = MakeTextButton("Erase", "eraser", toolCells[2],
+                () => StrokeSettings.Tool = ToolMode.Eraser, ButtonFont);
+
+            layout.Gap(0.010f);
+
+            var mirrorRow = layout.Row(0.034f);
+            MakeToggleButton("Mirror", mirrorRow.Fill(),
+                () => Mirror.Enabled,
+                () => Mirror.Toggle(Camera.main != null ? Camera.main.transform : transform));
+
+            // separator
+            layout.Gap(0.012f);
+            MakeRounded(panel.transform, "Sep3",
+                new Vector3(0f, layout.Cursor, z),
+                new Vector2(panelSize.x - pad * 2f, 0.002f),
+                0.001f, TrackColor, QueueControl);
+            layout.Gap(0.014f);
+
+
+            // ---------- EDITING ----------
+            var actionRow = layout.Row(0.034f);
             var actionCells = actionRow.Split(4);
             MakeTextButton("Undo", "undo", actionCells[0], StrokeHistory.Undo, ActionFont);
             MakeTextButton("Redo", "redo", actionCells[1], StrokeHistory.Redo, ActionFont);
@@ -282,7 +323,7 @@ namespace MixedRealityProject.Drawing
             int n = BrushOrder.Length;
             float contentH = n * bSize + (n - 1) * bGap;
             var stripSize = new Vector2(bSize + 0.014f, contentH + 0.014f);
-            float stripX = panelSize.x * 0.5f + 0.012f + stripSize.x * 0.5f;
+            float stripX = -panelSize.x * 0.5f - 0.012f - stripSize.x * 0.5f;
 
             var strip = MakeRounded(panel.transform, "BrushStrip", new Vector3(stripX, 0f, 0f),
                 stripSize, 0.016f, PanelColor, QueuePanel);
