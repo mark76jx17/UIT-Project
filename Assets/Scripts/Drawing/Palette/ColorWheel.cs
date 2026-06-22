@@ -42,7 +42,7 @@ namespace MixedRealityProject.Drawing
             knobGO.transform.SetParent(transform, false);
             var knobFilter = knobGO.AddComponent<MeshFilter>();
             knobFilter.mesh = RoundedMesh.Rect(0.009f, 0.009f, 0.0045f);
-            knobGO.AddComponent<MeshRenderer>().material = BrushMaterials.CreateUnlit(Color.white);
+            knobGO.AddComponent<MeshRenderer>().material = BrushMaterials.CreateUnlit(Color.white, opaque: true);
             knob = knobGO.transform;
         }
 

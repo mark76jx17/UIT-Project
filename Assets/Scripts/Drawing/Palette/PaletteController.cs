@@ -19,8 +19,10 @@ namespace MixedRealityProject.Drawing
         [Header("Aggancio al polso (regolabili da Inspector)")]
         public Vector3 localOffset = new(0f, 0.06f, 0.04f);
         public Vector3 localEuler = new(-40f, 180f, 0f);
-        [Tooltip("Sul visore: quanto sopra la mano fluttua il pannello.")]
-        public float heightAboveHand = 0.15f;
+        [Tooltip("Sul visore: quanto sopra la mano fluttua il pannello. Deve superare la " +
+                 "metà altezza del pannello (~0.22) così il bordo inferiore resta sopra la " +
+                 "mano e il controller non lo trapassa.")]
+        public float heightAboveHand = 0.22f;
 
 #if UNITY_EDITOR
         [SerializeField] bool pinPaletteInEditor = false;
@@ -36,7 +38,7 @@ namespace MixedRealityProject.Drawing
         static readonly Color ButtonColor = new(0.22f, 0.22f, 0.27f, 1f);
         static readonly Color AccentColor = new(0.55f, 0.45f, 0.95f, 1f);
         static readonly Color TrackColor = new(0.32f, 0.32f, 0.38f, 1f);
-        static readonly Color EmptySwatch = new(1f, 1f, 1f, 0.15f);
+        static readonly Color EmptySwatch = new(0.16f, 0.16f, 0.20f, 1f); // slot vuoto: grigio scuro opaco
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
         // Ordini di disegno (tutti i materiali UI sono trasparenti con ZWrite off:
@@ -47,10 +49,13 @@ namespace MixedRealityProject.Drawing
         const int QueueText = 3004;    // etichette TMP
 
         // Dimensioni font (point-size TMP in unità locali metriche: ~0.003 m per unità).
-        const float SectionFont = 0.175f;
         const float ButtonFont = 0.20f;   // Draw/Fill/Erase (riga larga)
-        const float ActionFont = 0.16f;   // Undo/Redo/Save/Load (riga stretta)
         const float ToggleFont = 0.24f;
+
+        // Icone nei bottoni testuali (Draw/Fill/Erase, Undo/Redo/Save/Load): disattivate
+        // su richiesta — solo label testuale. Il codice icone (ToolIcon/MakeIconImage)
+        // resta nel repo: basta rimettere true per riattivarle.
+        static readonly bool ShowButtonIcons = false;
 
         // anteprime tratto per i 4 pennelli, in ordine BrushType (Round/Ribbon/Glow/Dashed)
         static readonly BrushType[] BrushOrder = { BrushType.Round, BrushType.Ribbon, BrushType.Glow, BrushType.Dashed };
@@ -180,20 +185,21 @@ namespace MixedRealityProject.Drawing
             panel = new GameObject("Panel");
             panel.transform.SetParent(transform, false);
 
-            var panelSize = new Vector2(0.32f, 0.56f);
-            const float pad = 0.018f, rowGap = 0.010f, colGap = 0.012f, z = -0.002f;
+            var panelSize = new Vector2(0.26f, 0.43f);
+            const float pad = 0.012f, rowGap = 0.008f, colGap = 0.012f, z = -0.002f;
 
             MakeRounded(panel.transform, "MainPanel", Vector3.zero, panelSize, 0.020f, PanelColor, QueuePanel);
 
             BuildBrushStrip(panelSize);
+            BuildActionStrip(panelSize);
 
             var layout = new PaletteLayout(panelSize, pad, rowGap, colGap, z);
 
-            // ---------- COLOR ----------
-            var colorRow = layout.Row(0.115f);
-            var wheelCell = colorRow.Left(0.115f);
-            var brightCell = colorRow.Left(0.020f);
-            var brightLabelCell = colorRow.Fill();
+            // ---------- COLOR (ruota circolare + slider luminosità) ----------
+            var colorRow = layout.Row(0.10f);
+            var wheelCell = colorRow.Left(0.10f);
+            colorRow.Left(0.008f);                 // spazietto tra ruota e barra
+            var brightCell = colorRow.Left(0.016f);
 
             var wheel = new GameObject("ColorWheel");
             wheel.transform.SetParent(panel.transform, false);
@@ -201,28 +207,20 @@ namespace MixedRealityProject.Drawing
             var colorWheel = wheel.AddComponent<ColorWheel>();
             colorWheel.Build(Mathf.Min(wheelCell.Size.x, wheelCell.Size.y));
             colorWheel.SetProximityTarget(Brush != null ? Brush.Tip : null);
-            SetQueue(wheel, QueueControl);
-
-            MakeLabel(panel.transform, "Brightness", brightLabelCell.Center,
-                brightLabelCell.Size, SectionFont, TextAlignmentOptions.Left);
 
             var bright = new GameObject("BrightnessSlider");
             bright.transform.SetParent(panel.transform, false);
             bright.transform.localPosition = brightCell.Center;
-            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.018f, brightCell.Size.y * 0.95f));
-            SetQueue(bright, QueueControl);
+            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, brightCell.Size.y * 0.95f));
             layout.Gap(0.007f);
 
             var recentRow = layout.Row(0.030f);
-            var recentLabel = recentRow.Left(0.090f);
-            MakeLabel(panel.transform, "Recent", recentLabel.Center,
-                recentLabel.Size, SectionFont, TextAlignmentOptions.Left);
-
+            var recentCells = recentRow.Split(5);
             recentSwatches = new Renderer[5];
             for (int i = 0; i < 5; i++)
             {
                 int idx = i;
-                var c = recentRow.Left(0.026f);
+                var c = recentCells[i];
                 var sw = MakeRoundedButton(panel.transform, $"Recent{i}", c.Center, c.Size,
                     0.006f, EmptySwatch, () =>
                     {
@@ -233,16 +231,11 @@ namespace MixedRealityProject.Drawing
             }
             layout.Gap(0.007f);
 
-            var alphaRow = layout.Row(0.026f);
-            MakeLabel(panel.transform, "Transparency", alphaRow.Left(0.105f).Center,
-                new Vector2(0.105f, 0.026f), SectionFont, TextAlignmentOptions.Left);
-
-            var alphaCell = alphaRow.Fill();
+            var alphaCell = layout.Row(0.024f).Fill();
             var alpha = new GameObject("AlphaSlider");
             alpha.transform.SetParent(panel.transform, false);
             alpha.transform.localPosition = alphaCell.Center;
-            alpha.AddComponent<AlphaSlider>().Build(new Vector2(alphaCell.Size.x, 0.012f));
-            SetQueue(alpha, QueueControl);
+            alpha.AddComponent<AlphaSlider>().Build(new Vector2(alphaCell.Size.x, 0.016f));
 
             // separator
             layout.Gap(0.008f);
@@ -250,7 +243,7 @@ namespace MixedRealityProject.Drawing
                 new Vector3(0f, layout.Cursor, z),
                 new Vector2(panelSize.x - pad * 2f, 0.002f),
                 0.001f, TrackColor, QueueControl);
-            layout.Gap(0.022f);
+            layout.Gap(0.014f);
 
 
             // ---------- BRUSH ----------
@@ -260,16 +253,11 @@ namespace MixedRealityProject.Drawing
                 () => StrokeSettings.SizeMode = StrokeSettings.SizeMode == SizeMode.PressureBrush
                     ? SizeMode.FixedPen : SizeMode.PressureBrush);
 
-            var sizeRow = layout.Row(0.028f);
-            MakeLabel(panel.transform, "Size", sizeRow.Left(0.060f).Center,
-                new Vector2(0.060f, 0.028f), SectionFont, TextAlignmentOptions.Left);
-
-            var sizeCell = sizeRow.Fill();
+            var sizeCell = layout.Row(0.024f).Fill();
             var size = new GameObject("SizeSlider");
             size.transform.SetParent(panel.transform, false);
             size.transform.localPosition = sizeCell.Center;
-            size.AddComponent<SizeSlider>().Build(new Vector2(sizeCell.Size.x, 0.012f));
-            SetQueue(size, QueueControl);
+            size.AddComponent<SizeSlider>().Build(new Vector2(sizeCell.Size.x, 0.018f));
 
             // separator
             layout.Gap(0.012f);
@@ -277,7 +265,7 @@ namespace MixedRealityProject.Drawing
                 new Vector3(0f, layout.Cursor, z),
                 new Vector2(panelSize.x - pad * 2f, 0.002f),
                 0.001f, TrackColor, QueueControl);
-            layout.Gap(0.022f);
+            layout.Gap(0.014f);
 
 
             // ---------- TOOL ----------
@@ -297,22 +285,6 @@ namespace MixedRealityProject.Drawing
                 () => Mirror.Enabled,
                 () => Mirror.Toggle(Camera.main != null ? Camera.main.transform : transform));
 
-            // separator
-            layout.Gap(0.012f);
-            MakeRounded(panel.transform, "Sep3",
-                new Vector3(0f, layout.Cursor, z),
-                new Vector2(panelSize.x - pad * 2f, 0.002f),
-                0.001f, TrackColor, QueueControl);
-            layout.Gap(0.014f);
-
-
-            // ---------- EDITING ----------
-            var actionRow = layout.Row(0.034f);
-            var actionCells = actionRow.Split(4);
-            MakeTextButton("Undo", "undo", actionCells[0], StrokeHistory.Undo, ActionFont);
-            MakeTextButton("Redo", "redo", actionCells[1], StrokeHistory.Redo, ActionFont);
-            MakeTextButton("Save", "save", actionCells[2], DrawingStore.Save, ActionFont);
-            MakeTextButton("Load", "load", actionCells[3], DrawingStore.Load, ActionFont);
         }
 
         // Striscia verticale dei 4 tipi di pennello, ancorata a destra del pannello
@@ -342,6 +314,36 @@ namespace MixedRealityProject.Drawing
             }
         }
 
+        // Striscia verticale Undo/Redo/Save/Load, ancorata a destra del pannello.
+        // Solo icone (niente testo), per accorciare il pannello principale.
+        void BuildActionStrip(Vector2 panelSize)
+        {
+            var actions = new (string name, System.Action action)[]
+            {
+                ("undo", StrokeHistory.Undo),
+                ("redo", StrokeHistory.Redo),
+                ("save", DrawingStore.Save),
+                ("load", DrawingStore.Load),
+            };
+            const float bSize = 0.040f, bGap = 0.010f;
+            int n = actions.Length;
+            float contentH = n * bSize + (n - 1) * bGap;
+            var stripSize = new Vector2(bSize + 0.012f, contentH + 0.012f);
+            float stripX = panelSize.x * 0.5f + 0.012f + stripSize.x * 0.5f;
+
+            var strip = MakeRounded(panel.transform, "ActionStrip", new Vector3(stripX, 0f, 0f),
+                stripSize, 0.014f, PanelColor, QueuePanel);
+
+            float y0 = (contentH - bSize) * 0.5f;
+            for (int i = 0; i < n; i++)
+            {
+                float y = y0 - i * (bSize + bGap);
+                var b = MakeRoundedButton(strip.transform, actions[i].name, new Vector3(0f, y, -0.004f),
+                    new Vector2(bSize, bSize), 0.010f, ButtonColor, actions[i].action);
+                MakeIconImage(b.transform, actions[i].name, new Vector3(0f, 0f, -0.004f), bSize * 0.55f);
+            }
+        }
+
         // Pulsante con icona a sinistra + testo a destra, senza sovrapposizioni
         // (Draw/Fill/Erase, Undo/Redo/Save/Load).
         Renderer MakeTextButton(string label, string iconName, Cell cell, System.Action action, float fontSize)
@@ -350,15 +352,17 @@ namespace MixedRealityProject.Drawing
                 Mathf.Min(0.008f, cell.Size.y * 0.3f), ButtonColor, action);
 
             float w = cell.Size.x;
-            float iconSize = Mathf.Min(cell.Size.y * 0.62f, 0.018f);
-            float iconX = -w * 0.5f + iconSize * 0.5f + 0.006f;
-            MakeIconImage(b.transform, iconName, new Vector3(iconX, 0f, -0.004f), iconSize);
+            if (ShowButtonIcons)
+            {
+                float iconSize = Mathf.Min(cell.Size.y * 0.55f, 0.015f);
+                float iconX = -w * 0.5f + iconSize * 0.5f + 0.005f;
+                MakeIconImage(b.transform, iconName, new Vector3(iconX, 0f, -0.004f), iconSize);
+            }
 
-            // Testo centrato nel pulsante (allineato col bottone), con un margine a
-            // sinistra che lascia spazio all'icona.
-            float leftMargin = iconSize + 0.010f;
-            MakeLabel(b.transform, label, new Vector3(leftMargin * 0.5f, 0f, -0.004f),
-                new Vector2(w - leftMargin - 0.008f, cell.Size.y), fontSize, TextAlignmentOptions.Center);
+            // Solo label testuale, centrata sull'intero bottone (allineamento Center su box
+            // a piena larghezza). Icone disattivate via ShowButtonIcons.
+            MakeLabel(b.transform, label, new Vector3(0f, 0f, -0.004f),
+                new Vector2(w, cell.Size.y), fontSize, TextAlignmentOptions.Center);
             return b.GetComponent<Renderer>();
         }
 
@@ -372,13 +376,6 @@ namespace MixedRealityProject.Drawing
             toggleSync.Add(() => r.material.SetColor(BaseColorId, isOn() ? AccentColor : ButtonColor));
         }
 
-        // Porta tutti i renderer di un sotto-albero (ruota/slider e relativi pomelli)
-        // sopra lo sfondo del pannello, per evitare il sorting trasparente instabile.
-        static void SetQueue(GameObject root, int queue)
-        {
-            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
-                r.material.renderQueue = queue;
-        }
 
         // Quad con texture (anteprima tratto, ruota, ecc.) su materiale URP/Unlit.
         void MakeTexQuad(Transform parent, Texture2D tex, Vector3 localPos, Vector2 size)
@@ -400,14 +397,17 @@ namespace MixedRealityProject.Drawing
             MakeTexQuad(parent, ToolIcon.Get(name), localPos, new Vector2(size, size));
         }
 
-        GameObject MakeRounded(Transform parent, string name, Vector3 localPos, Vector2 size, float corner, Color color, int queue = QueueControl)
+        // opaque=true (default) per sfondi/controlli: niente see-through sul passthrough,
+        // sorting per depth. La render queue esplicita serve solo ai materiali trasparenti.
+        GameObject MakeRounded(Transform parent, string name, Vector3 localPos, Vector2 size, float corner, Color color, int queue = QueueControl, bool opaque = true)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             go.transform.localPosition = localPos;
             go.AddComponent<MeshFilter>().mesh = RoundedMesh.Rect(size.x, size.y, corner);
-            var mat = BrushMaterials.CreateUnlit(color);
-            mat.renderQueue = queue;
+            var mat = BrushMaterials.CreateUnlit(color, opaque);
+            if (!opaque)
+                mat.renderQueue = queue;
             go.AddComponent<MeshRenderer>().material = mat;
             return go;
         }

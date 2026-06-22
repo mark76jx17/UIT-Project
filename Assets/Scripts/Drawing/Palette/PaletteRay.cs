@@ -19,6 +19,7 @@ namespace MixedRealityProject.Drawing
 
         LineRenderer line;
         bool wasPressed;
+        bool startedOnPalette; // modalità "latchata" al fronte di salita del trigger
 
         void Awake()
         {
@@ -42,12 +43,29 @@ namespace MixedRealityProject.Drawing
             Vector3 dir = transform.forward;
 
             bool onPalette = TryHitPalette(origin, dir, out var hit);
-            Brush.SuppressDrawing = onPalette;
 
-            if (!onPalette)
+            float trigger = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, StrokeSettings.BrushHand);
+            bool pressed = trigger >= pressThreshold;
+            bool justPressed = pressed && !wasPressed;
+
+            // Latch della modalità al fronte di salita del trigger: se inizi a premere
+            // puntando la palette → interazione palette per tutta la pressione; se inizi a
+            // disegnare (non sulla palette) → la palette viene IGNORATA fino al rilascio,
+            // anche se il raggio la attraversa a metà tratto. Così non si interagisce per
+            // sbaglio con la palette mentre si disegna.
+            if (justPressed)
+                startedOnPalette = onPalette;
+            wasPressed = pressed;
+
+            // A trigger premuto vale la modalità latchata; a riposo il raggio fa solo da
+            // hint quando punta la palette.
+            bool paletteActive = onPalette && (!pressed || startedOnPalette);
+
+            Brush.SuppressDrawing = paletteActive;
+
+            if (!paletteActive)
             {
                 line.enabled = false;
-                wasPressed = false;
                 return;
             }
 
@@ -55,26 +73,24 @@ namespace MixedRealityProject.Drawing
             line.SetPosition(0, origin);
             line.SetPosition(1, hit.point);
 
-            float trigger = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, StrokeSettings.BrushHand);
-            bool pressed = trigger >= pressThreshold;
+            if (!pressed)
+                return;
+
             var go = hit.collider.gameObject;
 
-            // Pulsanti: scattano sul fronte di salita (un click). Slider/ruota: trascinano
+            // Pulsanti: scattano sul fronte di salita (un click). Slider/picker: trascinano
             // di continuo finché il trigger è premuto.
             if (go.TryGetComponent<PaletteButton>(out var button))
             {
-                if (pressed && !wasPressed)
+                if (justPressed)
                     button.Press();
             }
-            else if (pressed)
-            {
-                if (go.TryGetComponent<ColorWheel>(out var wheel)) wheel.PressAt(hit.point);
-                else if (go.TryGetComponent<AlphaSlider>(out var alpha)) alpha.PressAt(hit.point);
-                else if (go.TryGetComponent<SizeSlider>(out var size)) size.PressAt(hit.point);
-                else if (go.TryGetComponent<BrightnessSlider>(out var bright)) bright.PressAt(hit.point);
-            }
-
-            wasPressed = pressed;
+            else if (go.TryGetComponent<ColorWheel>(out var wheel)) wheel.PressAt(hit.point);
+            else if (go.TryGetComponent<BrightnessSlider>(out var bright)) bright.PressAt(hit.point);
+            else if (go.TryGetComponent<ColorSquare>(out var square)) square.PressAt(hit.point);
+            else if (go.TryGetComponent<HueBar>(out var hue)) hue.PressAt(hit.point);
+            else if (go.TryGetComponent<AlphaSlider>(out var alpha)) alpha.PressAt(hit.point);
+            else if (go.TryGetComponent<SizeSlider>(out var size)) size.PressAt(hit.point);
         }
 
         // Cerca il controllo della palette più vicino lungo il raggio, ignorando
@@ -102,8 +118,10 @@ namespace MixedRealityProject.Drawing
         static bool IsPaletteControl(GameObject go) =>
             go.GetComponent<PaletteButton>() != null
             || go.GetComponent<ColorWheel>() != null
+            || go.GetComponent<BrightnessSlider>() != null
+            || go.GetComponent<ColorSquare>() != null
+            || go.GetComponent<HueBar>() != null
             || go.GetComponent<AlphaSlider>() != null
-            || go.GetComponent<SizeSlider>() != null
-            || go.GetComponent<BrightnessSlider>() != null;
+            || go.GetComponent<SizeSlider>() != null;
     }
 }

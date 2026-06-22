@@ -215,3 +215,57 @@ camera (`PlacePaletteForEditor`), comodo per guardarla ma non per provare l'inte
 reale. Default cambiato a **`pinPaletteInEditor = false`** così nel simulatore la palette
 resta **sulla mano-palette** (sinistra), come sul device. La palette si avvia già aperta
 (`isOpen = true`); il trigger della mano-palette la apre/chiude.
+
+### Fix leak materiali in anteprima — `SetQueue` (2026-06-22)
+
+`Tools/Palette Preview/Build` (anteprima in edit mode) emetteva:
+*"Instantiating material due to calling renderer.material during edit mode. This will leak
+materials into the scene"* da `SetQueue` (`PaletteController.cs`). In edit mode il getter
+`renderer.material` **clona** il materiale e lascia materiali orfani nella scena. Dato che
+ogni controllo ha già un materiale unico (`BrushMaterials.CreateUnlit`), il fix usa
+`sharedMaterial` (modifica in place, nessuna clonazione), valido sia a runtime sia in editor.
+Verificato: l'anteprima non salvava comunque oggetti/materiali nel file di scena (la scena su
+disco resta pulita).
+
+---
+
+## 4. Step 4 — redesign grafico e usabilità (2026-06-22)
+
+Obiettivo (richiesta utente): togliere la trasparenza che fa vedere il passthrough
+attraverso slider e bordo della ruota, usare più spazio per il picker, slider orizzontali
+auto-esplicativi al posto delle label lunghe. Diviso in 4 sotto-step (4a–4d), ognuno
+compilato e verificato in anteprima (`Tools/Palette Preview`) via screenshot MCP.
+
+### 4a — Materiali opachi (fix trasparenza)
+`BrushMaterials.CreateUnlit(color, opaque=false)`: nuova variante **opaca** (`MakeOpaque`:
+`_Surface=0`, `ZWrite=1`, blend One/Zero, queue Geometry). `MakeRounded` ora crea sfondi
+opachi di default (`opaque=true`) → pannello, striscia, bottoni, separatori, swatch non si
+vedono più "attraverso" sul passthrough e il sorting è risolto dal **depth** invece che dalle
+render queue trasparenti. `EmptySwatch` da bianco α0.15 a grigio scuro opaco (slot vuoto
+leggibile anche senza alpha).
+
+### 4b — ColorSquare + HueBar (via la ruota)
+Nuovi componenti `ColorSquare` (quadrato Saturazione×Valore grande, texture rigenerata al
+cambio tinta) e `HueBar` (barra tinta orizzontale), entrambi opachi, col tocco del `BrushTip`
+(`OnTriggerStay`) o mouse/raggio (`PressAt`). **Rimossi** `ColorWheel` e lo slider
+`BrightnessSlider` (la luminosità è l'asse Y del quadrato). Pannello alzato da `0.56` a
+`0.64` m per fare spazio al picker.
+
+### 4c — Slider orizzontali auto-esplicativi
+- `AlphaSlider`: rampa del colore corrente (trasparente→pieno) sopra una **scacchiera opaca**
+  di sfondo → la trasparenza si legge come scacchiera, niente più see-through sul passthrough.
+- `SizeSlider`: riscritto come **cuneo** (sottile→spesso) tinto col colore corrente → mostra
+  lo spessore a colpo d'occhio. Entrambi si aggiornano col colore live.
+- Rimosse le label testuali "Transparency", "Size", "Recent"; swatch recenti distribuiti su
+  5 celle piene (`Split(5)`). Font `SectionFont` non più usato → rimosso.
+
+### 4d — Rifinitura e pulizia
+- `PaletteRay` (raggio) e `DesktopBrushSimulator` (mouse simulatore) riallineati da
+  `ColorWheel`/`BrightnessSlider` a `ColorSquare`/`HueBar`, così il nuovo picker risponde
+  anche a distanza e col mouse, non solo al tocco diretto.
+- Eliminati i file ora morti `ColorWheel.cs` e `BrightnessSlider.cs`; rimossi `SetQueue` e
+  `SectionFont` inutilizzati.
+
+**Verificato in anteprima editor** (screenshot): pannello opaco, picker S×V + hue, slider a
+scacchiera e a cuneo, layout completo senza overflow. **Da verificare su device/simulatore**:
+assenza di see-through sul passthrough e interazione (tocco/mouse/raggio) con picker e slider.

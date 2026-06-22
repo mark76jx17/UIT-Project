@@ -77,7 +77,9 @@ namespace MixedRealityProject.Drawing
             // Un solo raycast: cosa c'è sotto il cursore?
             PaletteButton hoveredButton = null;
             ColorWheel hoveredWheel = null;
-            BrightnessSlider hoveredSlider = null;
+            BrightnessSlider hoveredBright = null;
+            ColorSquare hoveredSquare = null;
+            HueBar hoveredHue = null;
 
             SizeSlider hoveredSizeSlider = null; // slider di dimensione
             AlphaSlider hoveredAlphaSlider = null; // slider trasparenza
@@ -90,7 +92,9 @@ namespace MixedRealityProject.Drawing
 
                 hit.collider.TryGetComponent(out hoveredButton);
                 hit.collider.TryGetComponent(out hoveredWheel);
-                hit.collider.TryGetComponent(out hoveredSlider);
+                hit.collider.TryGetComponent(out hoveredBright);
+                hit.collider.TryGetComponent(out hoveredSquare);
+                hit.collider.TryGetComponent(out hoveredHue);
                 var item = hit.collider.GetComponentInParent<DrawnItem>();
                 if (item != null)
                     hoveredItem = item.transform;
@@ -127,8 +131,9 @@ namespace MixedRealityProject.Drawing
                     hoveredButton.Press();
             }
 
-            // Sopra la ruota dei colori o gli slider, il click interagisce con loro invece di disegnare
-            else if (hoveredWheel != null || hoveredSlider != null
+            // Sopra il picker colore o gli slider, il click interagisce con loro invece di disegnare
+            else if (hoveredWheel != null || hoveredBright != null
+                     || hoveredSquare != null || hoveredHue != null
                      || hoveredSizeSlider != null || hoveredAlphaSlider != null)
             {
                 brush.TriggerOverride = 0f;
@@ -136,8 +141,12 @@ namespace MixedRealityProject.Drawing
                 {
                     if (hoveredWheel != null)
                         hoveredWheel.PressAt(hit.point);
-                    else if (hoveredSlider != null)
-                        hoveredSlider.PressAt(hit.point);
+                    else if (hoveredBright != null)
+                        hoveredBright.PressAt(hit.point);
+                    else if (hoveredSquare != null)
+                        hoveredSquare.PressAt(hit.point);
+                    else if (hoveredHue != null)
+                        hoveredHue.PressAt(hit.point);
                     else if (hoveredSizeSlider != null)
                         hoveredSizeSlider.PressAt(hit.point);
                     else

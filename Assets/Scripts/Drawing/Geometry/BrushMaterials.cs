@@ -56,15 +56,39 @@ namespace MixedRealityProject.Drawing
 
         /// <summary>
         /// Materiale Unlit non in cache (istanza dedicata, es. cursore del
-        /// pennello e pannelli della palette), sempre configurato trasparente
-        /// così l'alpha si può cambiare a runtime.
+        /// pennello e pannelli della palette). Di default trasparente (così l'alpha
+        /// si può cambiare a runtime); con <paramref name="opaque"/> true è opaco con
+        /// ZWrite — usato per sfondi/controlli della palette così sul passthrough MR
+        /// non si vede "attraverso" e il sorting è risolto dal depth invece che dalle
+        /// render queue trasparenti.
         /// </summary>
-        public static Material CreateUnlit(Color color)
+        public static Material CreateUnlit(Color color, bool opaque = false)
         {
             var material = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
             material.SetColor("_BaseColor", color);
-            MakeTransparent(material);
+            if (opaque)
+                MakeOpaque(material);
+            else
+                MakeTransparent(material);
             return material;
+        }
+
+        static void MakeOpaque(Material material)
+        {
+            material.SetFloat("_Surface", 0f); // 0 = Opaque
+            material.SetOverrideTag("RenderType", "Opaque");
+            material.SetInt("_SrcBlend", (int)BlendMode.One);
+            material.SetInt("_DstBlend", (int)BlendMode.Zero);
+            material.SetInt("_ZWrite", 1);
+            material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.renderQueue = (int)RenderQueue.Geometry;
+            // Sul passthrough Quest è il canale ALPHA del framebuffer a decidere cosa
+            // nasconde il mondo reale: un materiale opaco deve scrivere alpha = 1. Forzo
+            // l'alpha del colore a 1 (es. PanelColor è 0.96 → lasciava trasparire ~4% del
+            // passthrough, invisibile in editor ma visibile in VR).
+            var c = material.GetColor("_BaseColor");
+            c.a = 1f;
+            material.SetColor("_BaseColor", c);
         }
 
         static void MakeTransparent(Material material)

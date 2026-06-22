@@ -22,7 +22,7 @@ namespace MixedRealityProject.Drawing
             var filter = gameObject.AddComponent<MeshFilter>();
             filter.mesh = RoundedMesh.TexturedQuad(size.x, size.y);
             var renderer = gameObject.AddComponent<MeshRenderer>();
-            material = BrushMaterials.CreateUnlit(Color.white);
+            material = BrushMaterials.CreateUnlit(Color.white, opaque: true);
             material.SetTexture("_BaseMap", GenerateTexture(64));
             renderer.material = material;
 
@@ -36,7 +36,7 @@ namespace MixedRealityProject.Drawing
             var knobFilter = knobGO.AddComponent<MeshFilter>();
             knobFilter.mesh = RoundedMesh.Rect(size.x * 1.6f, 0.005f, 0.0025f);
             knobGO.AddComponent<MeshRenderer>().material =
-                BrushMaterials.CreateUnlit(new Color(1f, 1f, 1f, 0.95f));
+                BrushMaterials.CreateUnlit(Color.white, opaque: true);
             knob = knobGO.transform;
         }
 
