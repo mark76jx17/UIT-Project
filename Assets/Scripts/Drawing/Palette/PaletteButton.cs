@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace MixedRealityProject.Drawing
@@ -13,6 +14,16 @@ namespace MixedRealityProject.Drawing
     {
         public Action OnPressed;
 
+        /// <summary>
+        /// Registro di tutti i pulsanti attivi: lo snap-to-button del PaletteRay lo
+        /// scorre invece di fare un Physics.OverlapSphere da 2 m su tutta la scena
+        /// ogni frame. I pulsanti sono pochi e noti, non serve la fisica.
+        /// </summary>
+        public static readonly List<PaletteButton> Instances = new();
+
+        /// <summary>Collider del pulsante, cachato per lo snap del ray.</summary>
+        public Collider Col { get; private set; }
+
         const float DebounceSeconds = 0.3f;
         const float HapticDuration = 0.05f;
 
@@ -22,7 +33,11 @@ namespace MixedRealityProject.Drawing
         void Awake()
         {
             baseScale = transform.localScale;
+            Col = GetComponent<Collider>();
         }
+
+        void OnEnable() => Instances.Add(this);
+        void OnDisable() => Instances.Remove(this);
 
         void OnTriggerEnter(Collider other)
         {

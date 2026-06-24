@@ -21,13 +21,34 @@ namespace MixedRealityProject.Drawing
         Transform holding;
         Transform hovered;
 
+        // Haptic state
+        float hapticTimer;
+        float hapticFreq;
+        float hapticAmp;
+
         public OVRInput.Controller Controller
         {
             set => controller = value;
         }
 
+        void HapticPulse(float duration, float frequency = 0.5f, float amplitude = 0.6f)
+        {
+            hapticFreq = frequency;
+            hapticAmp = amplitude;
+            hapticTimer = duration;
+        }
+
         void Update()
         {
+            // Haptic timer
+            if (hapticTimer > 0f)
+            {
+                OVRInput.SetControllerVibration(hapticFreq, hapticAmp, controller);
+                hapticTimer -= Time.deltaTime;
+                if (hapticTimer <= 0f)
+                    OVRInput.SetControllerVibration(0f, 0f, controller);
+            }
+
             float grip = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger, controller);
 
             if (holding == null)
@@ -39,6 +60,8 @@ namespace MixedRealityProject.Drawing
                     SetHover(null);
                     StrokeHighlight.Set(holding, 1.45f);
                     GrabSession.Add(holding, this);
+                    // Impulso di conferma presa: breve e deciso
+                    HapticPulse(0.05f, frequency: 0.6f, amplitude: 0.7f);
                 }
             }
             else if (grip <= releaseThreshold || holding == null /* distrutto (gomma) */)
@@ -46,6 +69,8 @@ namespace MixedRealityProject.Drawing
                 GrabSession.Remove(this);
                 StrokeHighlight.Clear(holding);
                 holding = null;
+                // Impulso di rilascio: più morbido
+                HapticPulse(0.03f, frequency: 0.2f, amplitude: 0.3f);
             }
             else if (controller == StrokeSettings.BrushHand
                      && OVRInput.GetDown(OVRInput.Button.Two, controller))
@@ -66,14 +91,18 @@ namespace MixedRealityProject.Drawing
         // ha aggiornato la posa delle mani in Update.
         void LateUpdate() => GrabSession.ApplyIfLeader(this);
 
+        // Buffer riusato per l'hover: la variante NonAlloc evita l'allocazione di un
+        // array a ogni frame su entrambe le mani.
+        static readonly Collider[] overlapBuffer = new Collider[32];
+
         void UpdateHover()
         {
             Transform found = null;
-            var hits = Physics.OverlapSphere(transform.position, grabRadius,
-                Physics.AllLayers, QueryTriggerInteraction.Collide);
-            foreach (var hit in hits)
+            int count = Physics.OverlapSphereNonAlloc(transform.position, grabRadius,
+                overlapBuffer, Physics.AllLayers, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < count; i++)
             {
-                var item = hit.GetComponentInParent<DrawnItem>();
+                var item = overlapBuffer[i].GetComponentInParent<DrawnItem>();
                 if (item == null)
                     continue;
                 found = item.transform;
@@ -121,6 +150,7 @@ namespace MixedRealityProject.Drawing
             // presa a due mani: stato iniziale
             Vector3 a0, b0, pos0, scale0;
             Quaternion rot0;
+            Quaternion frame0; // orientamento iniziale delle mani (per il roll)
 
             public void Recapture()
             {
@@ -139,6 +169,8 @@ namespace MixedRealityProject.Drawing
                     pos0 = target.position;
                     rot0 = target.rotation;
                     scale0 = target.localScale;
+                    frame0 = HandFrame(a0, b0,
+                        hands[0].transform.rotation, hands[1].transform.rotation);
                 }
             }
 
@@ -160,12 +192,35 @@ namespace MixedRealityProject.Drawing
                     float scale = d0 > 1e-4f ? Vector3.Distance(a, b) / d0 : 1f;
                     var mid0 = (a0 + b0) * 0.5f;
                     var mid = (a + b) * 0.5f;
-                    var rotation = Quaternion.FromToRotation((b0 - a0).normalized, (b - a).normalized);
+                    // Rotazione completa (incluso il roll): differenza tra il frame
+                    // corrente delle mani e quello iniziale. FromToRotation catturava
+                    // solo lo swing, quindi torcendo i polsi l'oggetto non rollava.
+                    var frame = HandFrame(a, b,
+                        hands[0].transform.rotation, hands[1].transform.rotation);
+                    var rotation = frame * Quaternion.Inverse(frame0);
 
                     target.localScale = scale0 * scale;
                     target.rotation = rotation * rot0;
                     target.position = mid + rotation * (pos0 - mid0) * scale;
                 }
+            }
+
+            // Frame di orientamento definito dalle due mani: l'asse X è il vettore tra
+            // le mani; il "su" è la media dell'alto dei due controller, così ruotando
+            // entrambi i polsi attorno all'asse (roll) il frame ruota con loro.
+            static Quaternion HandFrame(Vector3 a, Vector3 b, Quaternion rotA, Quaternion rotB)
+            {
+                Vector3 axis = b - a;
+                axis = axis.sqrMagnitude < 1e-8f ? Vector3.right : axis.normalized;
+                Vector3 up = (rotA * Vector3.up) + (rotB * Vector3.up);
+                Vector3 upPerp = Vector3.ProjectOnPlane(up, axis);
+                if (upPerp.sqrMagnitude < 1e-6f)
+                {
+                    upPerp = Vector3.ProjectOnPlane(Vector3.up, axis);
+                    if (upPerp.sqrMagnitude < 1e-6f)
+                        upPerp = Vector3.ProjectOnPlane(Vector3.forward, axis);
+                }
+                return Quaternion.LookRotation(axis, upPerp.normalized);
             }
         }
 

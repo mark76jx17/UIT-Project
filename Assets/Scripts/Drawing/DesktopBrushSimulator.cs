@@ -23,6 +23,8 @@ namespace MixedRealityProject.Drawing
     ///   M                        = specchio/simmetria on/off
     ///   D                        = duplica l'oggetto sotto il cursore
     ///   F5 / F9                  = salva / carica il disegno
+    ///   N                        = nuovo disegno: svuota la scena (con backup automatico)
+    ///   O                        = esporta scena come OBJ in persistentDataPath
     /// </summary>
     [DefaultExecutionOrder(-10)] // posiziona il pennello prima che BrushController campioni
     [RequireComponent(typeof(BrushController))]
@@ -194,6 +196,8 @@ namespace MixedRealityProject.Drawing
                 StrokeSettings.Type = (BrushType)(((int)StrokeSettings.Type + 1) % 4);
             if (keyboard.f5Key.wasPressedThisFrame) DrawingStore.Save();
             if (keyboard.f9Key.wasPressedThisFrame) DrawingStore.Load();
+            if (keyboard.nKey.wasPressedThisFrame)  DrawingStore.NewScene();
+            if (keyboard.oKey.wasPressedThisFrame)  DrawingStore.ExportOBJ();
 
             for (int i = 0; i < QuickColors.Length; i++)
                 if (keyboard[Key.Digit1 + i].wasPressedThisFrame)

@@ -9,6 +9,11 @@ namespace MixedRealityProject.Drawing
     /// punta la palette il pennello non disegna (vedi BrushController.SuppressDrawing),
     /// così il trigger "clicca" invece di tracciare. Da vicino resta valido anche il
     /// poke con la punta: i due modi convivono (PaletteButton ha un debounce).
+    ///
+    /// [NUOVO] Snap-to-button assistito: se nessun controllo è colpito direttamente
+    /// ma un PaletteButton si trova entro snapAngleDeg gradi dalla direzione del ray,
+    /// il raggio scatta verso quel pulsante. Riduce gli errori di selezione su target
+    /// piccoli o a distanza (ispirato a Gabel et al., SUI 2024 — raycast redirection).
     /// </summary>
     public class PaletteRay : MonoBehaviour
     {
@@ -16,6 +21,9 @@ namespace MixedRealityProject.Drawing
 
         [SerializeField] float maxDistance = 2f;
         [SerializeField] float pressThreshold = 0.55f;
+
+        [Tooltip("Angolo massimo (gradi) entro cui il raggio scatta verso un PaletteButton vicino.")]
+        [SerializeField] float snapAngleDeg = 5f;
 
         LineRenderer line;
         bool wasPressed;
@@ -94,15 +102,20 @@ namespace MixedRealityProject.Drawing
         }
 
         // Cerca il controllo della palette più vicino lungo il raggio, ignorando
-        // collider non-palette (incluso il proprio BrushTip).
+        // collider non-palette (incluso il proprio BrushTip). Se non trova un hit
+        // diretto, tenta lo snap-to-button assistito (vedi TrySnapToPaletteButton).
+        // Buffer riusato: RaycastNonAlloc non alloca un array ad ogni frame come RaycastAll.
+        static readonly RaycastHit[] rayBuffer = new RaycastHit[32];
+
         bool TryHitPalette(Vector3 origin, Vector3 dir, out RaycastHit best)
         {
             best = default;
-            var hits = Physics.RaycastAll(origin, dir, maxDistance, ~0, QueryTriggerInteraction.Collide);
+            int count = Physics.RaycastNonAlloc(origin, dir, rayBuffer, maxDistance, ~0, QueryTriggerInteraction.Collide);
             float nearest = float.MaxValue;
             bool found = false;
-            foreach (var h in hits)
+            for (int i = 0; i < count; i++)
             {
+                var h = rayBuffer[i];
                 if (!IsPaletteControl(h.collider.gameObject))
                     continue;
                 if (h.distance < nearest)
@@ -112,7 +125,49 @@ namespace MixedRealityProject.Drawing
                     found = true;
                 }
             }
+
+            // Snap-to-button: se il raycast diretto non ha trovato nulla, cerca un
+            // PaletteButton nel cono di snapAngleDeg gradi attorno alla direzione del ray.
+            // Ispirato alla raycast redirection di Gabel et al. (SUI 2024).
+            if (!found)
+                found = TrySnapToPaletteButton(origin, dir, out best);
+
             return found;
+        }
+
+        /// <summary>
+        /// Scatta verso il PaletteButton più vicino all'asse del ray, se entro snapAngleDeg.
+        /// Rilancia un raycast diretto verso il centro del button per ottenere un hit valido.
+        /// </summary>
+        bool TrySnapToPaletteButton(Vector3 origin, Vector3 dir, out RaycastHit result)
+        {
+            result = default;
+            float bestAngle = snapAngleDeg;
+            Collider bestCol = null;
+
+            // Scorre il registro dei PaletteButton (pochi e noti) invece di interrogare
+            // la fisica su tutta la scena: nessun Physics.OverlapSphere da 2 m per frame.
+            var buttons = PaletteButton.Instances;
+            for (int i = 0; i < buttons.Count; i++)
+            {
+                var btn = buttons[i];
+                if (btn == null || btn.Col == null) continue;
+                var to = btn.Col.bounds.center - origin;
+                if (to.sqrMagnitude > maxDistance * maxDistance) continue;
+                float angle = Vector3.Angle(dir, to);
+                if (angle < bestAngle)
+                {
+                    bestAngle = angle;
+                    bestCol = btn.Col;
+                }
+            }
+
+            if (bestCol == null) return false;
+
+            // Lancia un ray diretto verso il centro del button per ottenere l'hit esatto
+            var snapDir = (bestCol.bounds.center - origin).normalized;
+            return Physics.Raycast(origin, snapDir, out result, maxDistance, ~0, QueryTriggerInteraction.Collide)
+                   && result.collider == bestCol;
         }
 
         static bool IsPaletteControl(GameObject go) =>

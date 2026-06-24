@@ -30,6 +30,7 @@ namespace MixedRealityProject.Drawing
                 case "redo": Arc(true); break;
                 case "save": SaveLoad(down: true); break;
                 case "load": SaveLoad(down: false); break;
+                case "clear": Trash(); break;
                 default: Disc(Vector2.zero, 0.4f); break;
             }
 
@@ -85,6 +86,17 @@ namespace MixedRealityProject.Drawing
             Vector2 n = new(-tangent.y, tangent.x);
             Vector2 baseC = tip - tangent * 0.04f;
             Tri(tip + tangent * 0.26f, baseC + n * 0.20f, baseC - n * 0.20f);
+        }
+
+        static void Trash()
+        {
+            Box(new(0f, 0.58f), new(0.16f, 0.06f));   // manico
+            Box(new(0f, 0.42f), new(0.46f, 0.085f));  // coperchio
+            // corpo a trapezio (due triangoli)
+            Vector2 tl = new(-0.34f, 0.30f), tr = new(0.34f, 0.30f);
+            Vector2 bl = new(-0.24f, -0.55f), br = new(0.24f, -0.55f);
+            Tri(tl, bl, br);
+            Tri(tl, br, tr);
         }
 
         static void SaveLoad(bool down)

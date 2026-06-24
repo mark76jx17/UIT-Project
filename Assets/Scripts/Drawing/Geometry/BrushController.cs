@@ -9,6 +9,10 @@ namespace MixedRealityProject.Drawing
     /// La pressione del trigger dà lo spessore, modulato lungo il tratto.
     /// Un cursore sferico sulla punta mostra colore e spessore correnti.
     /// In modalità gomma il trigger cancella l'oggetto toccato.
+    ///
+    /// [NUOVO] Haptic feedback: impulsi tattili su inizio/fine tratto e snap-merge.
+    /// [NUOVO] Campionamento adattivo: la distanza minima tra campioni scala con la
+    ///         velocità del controller, producendo più dettaglio nei movimenti veloci.
     /// </summary>
     public class BrushController : MonoBehaviour
     {
@@ -48,6 +52,20 @@ namespace MixedRealityProject.Drawing
         [Tooltip("Distanza massima tra gli estremi perché un tratto sia 'chiuso' e riempibile.")]
         [SerializeField] float fillCloseThreshold = 0.05f;
 
+        [Header("Campionamento adattivo")]
+        [Tooltip("Velocità controller (m/s) oltre cui la distanza minima scende al valore minimo.")]
+        [SerializeField] float adaptiveSpeedMax = 0.5f;
+        [Tooltip("Distanza minima a bassa velocità (pennello fermo = meno punti).")]
+        [SerializeField] float adaptiveMinSlow = 0.010f;
+        [Tooltip("Distanza minima ad alta velocità (movimento rapido = più dettaglio).")]
+        [SerializeField] float adaptiveMinFast = 0.002f;
+
+        [Header("Haptic feedback")]
+        [Tooltip("Durata dell'impulso su inizio/fine tratto (secondi).")]
+        [SerializeField] float hapticStrokeDuration = 0.04f;
+        [Tooltip("Durata dell'impulso speciale snap-merge (secondi).")]
+        [SerializeField] float hapticSnapDuration = 0.08f;
+
         static readonly Color EraserCursorColor = new(0.45f, 0.45f, 0.45f, 0.7f);
 
         public bool IsDrawing { get; private set; }
@@ -76,6 +94,14 @@ namespace MixedRealityProject.Drawing
 
         bool fillConsumed;     // un solo riempimento per pressione del trigger
         Transform fillHover;   // tratto chiuso attualmente evidenziato in modo Fill
+
+        // Haptic state
+        float hapticTimer;
+        float hapticFreq;
+        float hapticAmp;
+
+        // Per campionamento adattivo: posizione precedente del controller
+        Vector3 prevPosition;
 
         Transform cursor;
         Material cursorMaterial;
@@ -113,6 +139,15 @@ namespace MixedRealityProject.Drawing
             float trigger = TriggerOverride
                             ?? OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, StrokeSettings.BrushHand);
             Vector3 position = Tip != null ? Tip.position : transform.position;
+
+            // Haptic timer: mantieni la vibrazione per la durata programmata, poi spegni.
+            if (hapticTimer > 0f)
+            {
+                OVRInput.SetControllerVibration(hapticFreq, hapticAmp, StrokeSettings.BrushHand);
+                hapticTimer -= Time.deltaTime;
+                if (hapticTimer <= 0f)
+                    OVRInput.SetControllerVibration(0f, 0f, StrokeSettings.BrushHand);
+            }
 
             UpdateCursor(trigger);
 
@@ -166,6 +201,17 @@ namespace MixedRealityProject.Drawing
                 ContinuePress(position, trigger);
         }
 
+        /// <summary>
+        /// Impulso aptico sul controller del pennello.
+        /// frequency e amplitude sono nel range [0, 1].
+        /// </summary>
+        void HapticPulse(float duration, float frequency = 0.5f, float amplitude = 0.6f)
+        {
+            hapticFreq = frequency;
+            hapticAmp = amplitude;
+            hapticTimer = duration;
+        }
+
         // Lo slider "size" decide lo spessore base (vale sempre); con Pressure ON
         // la pressione del trigger lo modula da minPressureFraction a 1.
         float TriggerToRadius(float trigger)
@@ -198,11 +244,19 @@ namespace MixedRealityProject.Drawing
             {
                 mergeTarget = target;
                 position = snapped; // il tratto parte attaccato all'oggetto esistente
+                // Snap-merge: impulso distintivo (più lungo e forte) per conferma tattile
+                HapticPulse(hapticSnapDuration, frequency: 0.8f, amplitude: 0.8f);
+            }
+            else
+            {
+                // Inizio normale del tratto: impulso breve
+                HapticPulse(hapticStrokeDuration, frequency: 0.4f, amplitude: 0.5f);
             }
 
             pressPosition = position;
             pressTime = Time.time;
             smoothed = position;
+            prevPosition = position;
             current = Stroke.Begin(position, currentRadius);
             mirrored = Mirror.Enabled ? Stroke.Begin(Mirror.Reflect(position), currentRadius) : null;
         }
@@ -210,8 +264,22 @@ namespace MixedRealityProject.Drawing
         void ContinuePress(Vector3 position, float trigger)
         {
             currentRadius = Mathf.Lerp(currentRadius, TriggerToRadius(trigger), radiusSmoothing);
-            smoothed = Vector3.Lerp(smoothed, position, smoothing);
-            if (Vector3.Distance(smoothed, current.LastPoint) >= minSampleDistance)
+            // Smoothing indipendente dal frame-rate: 'smoothing' è il peso per-frame a
+            // 72 Hz (refresh di riferimento del Quest). Senza correzione, a 90/120 Hz il
+            // tratto verrebbe più liscio che a 72 Hz (più Lerp al secondo) e diverso in
+            // editor; l'esponente su Time.deltaTime normalizza il risultato.
+            float smoothAlpha = 1f - Mathf.Pow(1f - smoothing, Time.deltaTime * 72f);
+            smoothed = Vector3.Lerp(smoothed, position, smoothAlpha);
+
+            // Campionamento adattivo alla velocità: movimenti veloci → distanza minima ridotta
+            // (più campioni = maggiore fedeltà del tratto); movimenti lenti → distanza maggiore
+            // (meno punti inutili quando la mano è quasi ferma).
+            float speed = Vector3.Distance(position, prevPosition) / Mathf.Max(Time.deltaTime, 1e-4f);
+            float adaptiveMin = Mathf.Lerp(adaptiveMinSlow, adaptiveMinFast,
+                                            Mathf.Clamp01(speed / adaptiveSpeedMax));
+            prevPosition = position;
+
+            if (Vector3.Distance(smoothed, current.LastPoint) >= adaptiveMin)
             {
                 current.AddPoint(smoothed, currentRadius);
                 if (mirrored != null)
@@ -223,11 +291,14 @@ namespace MixedRealityProject.Drawing
         {
             pressed = false;
             IsDrawing = false;
+            // Fine tratto: impulso breve di conferma
+            HapticPulse(hapticStrokeDuration, frequency: 0.3f, amplitude: 0.4f);
 
             bool isTap = Time.time - pressTime <= tapMaxDuration
                          && Vector3.Distance(position, pressPosition) <= tapMaxMovement;
 
             GameObject finished;
+            GameObject mirroredObj = null;
             if (isTap || current.PointCount < 2)
             {
                 Destroy(current.gameObject);
@@ -235,7 +306,7 @@ namespace MixedRealityProject.Drawing
                 if (mirrored != null)
                 {
                     Destroy(mirrored.gameObject);
-                    StrokeHistory.Push(Stroke.CreatePoint(Mirror.Reflect(pressPosition), currentRadius));
+                    mirroredObj = Stroke.CreatePoint(Mirror.Reflect(pressPosition), currentRadius);
                 }
             }
             else
@@ -246,7 +317,7 @@ namespace MixedRealityProject.Drawing
                 if (mirrored != null)
                 {
                     mirrored.Finish();
-                    StrokeHistory.Push(mirrored.gameObject);
+                    mirroredObj = mirrored.gameObject;
                 }
             }
 
@@ -259,7 +330,11 @@ namespace MixedRealityProject.Drawing
                 Destroy(finished.GetComponent<DrawnItem>()); // il "vero" oggetto è la radice
             }
 
-            StrokeHistory.Push(finished);
+            // Tratto + eventuale gemello speculare come UN solo passo di undo.
+            if (mirroredObj != null)
+                StrokeHistory.PushGroup(finished, mirroredObj);
+            else
+                StrokeHistory.Push(finished);
             StrokeSettings.PushRecentColor(StrokeSettings.BaseColor); // colore appena usato → recenti
             current = null;
             mirrored = null;
@@ -304,12 +379,17 @@ namespace MixedRealityProject.Drawing
                 StrokeHighlight.Set(fillHover, 1.3f);
         }
 
+        // Buffer riusato per le query di prossimità: la variante NonAlloc non genera
+        // garbage ogni frame (la OverlapSphere normale alloca un array a ogni chiamata).
+        static readonly Collider[] overlapBuffer = new Collider[32];
+
         bool FindNearbyItem(Vector3 position, out Transform target, out Vector3 snapped)
         {
-            var hits = Physics.OverlapSphere(position, snapRadius,
+            int count = Physics.OverlapSphereNonAlloc(position, snapRadius, overlapBuffer,
                 Physics.AllLayers, QueryTriggerInteraction.Collide);
-            foreach (var hit in hits)
+            for (int i = 0; i < count; i++)
             {
+                var hit = overlapBuffer[i];
                 var item = hit.GetComponentInParent<DrawnItem>();
                 if (item == null)
                     continue;

@@ -14,11 +14,13 @@ namespace MixedRealityProject.Drawing
     /// - UV: u = giro dell'anello, v = lunghezza percorsa in metri (per materiali con texture).
     /// - Upload economico: bounds mantenuti incrementalmente (niente RecalculateBounds O(n))
     ///   e SetTriangles senza validazione.
+    /// - [NUOVO] Indici a 32 bit (IndexFormat.UInt32): supporta fino a ~4M vertici invece
+    ///   dei ~64K del formato a 16 bit, eliminando il troncamento dei tratti lunghi.
     /// </summary>
     public class TubeMesher
     {
-        // Mesh a 16 bit: ~65k vertici. Oltre, il tratto smette di crescere.
-        const int MaxVertices = 64000;
+        // Mesh a 32 bit: limite pratico ~1M vertici (RAM device). Prima era 64 000 (16-bit).
+        const int MaxVertices = 1_000_000;
 
         readonly Mesh mesh;
         readonly int sides;
@@ -39,6 +41,9 @@ namespace MixedRealityProject.Drawing
         {
             this.mesh = mesh;
             this.sides = sides;
+            // 32-bit index format: rimuove il limite a ~64K vertici del formato 16-bit.
+            // Su Meta Quest 3/3S la GPU supporta pienamente UInt32.
+            mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.MarkDynamic();
         }
 

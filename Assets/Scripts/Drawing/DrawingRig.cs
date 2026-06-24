@@ -15,6 +15,13 @@ namespace MixedRealityProject.Drawing
 
         void Start()
         {
+            // Reset dello stato static: in editor con "Reload Domain" disattivato la
+            // cronologia e la cache materiali sopravvivono tra le sessioni di Play e
+            // conserverebbero riferimenti a oggetti distrutti. Sul device gira una
+            // sola volta all'avvio ed è innocuo (niente da pulire).
+            StrokeHistory.Clear();
+            BrushMaterials.ClearCache();
+
             StrokeSettings.BrushHand = leftHanded ? OVRInput.Controller.LTouch : OVRInput.Controller.RTouch;
             StrokeSettings.PaletteHand = leftHanded ? OVRInput.Controller.RTouch : OVRInput.Controller.LTouch;
             StrokeSettings.LoadRecentColors(); // ripristina i 5 colori recenti salvati

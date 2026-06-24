@@ -66,6 +66,16 @@ namespace MixedRealityProject.Drawing
         Renderer[] recentSwatches;
         readonly List<System.Action> toggleSync = new();
 
+        // Camera.main fa una FindGameObjectWithTag interna a ogni chiamata: la testa
+        // non cambia, quindi la cachiamo una volta invece di interrogarla per frame.
+        Camera head;
+        Camera Head => head != null ? head : (head = Camera.main);
+
+        // Ultimo stato applicato a SyncSelection: riscriviamo il colore dei bottoni
+        // solo quando cambia davvero, non a ogni frame.
+        ToolMode lastTool = (ToolMode)(-1);
+        int lastType = -1;
+
         // ---- apertura/chiusura animata col tasto X ----
         bool isOpen = true;
         float visibility = 1f;
@@ -89,15 +99,14 @@ namespace MixedRealityProject.Drawing
 #if UNITY_EDITOR
         void PlacePaletteForEditor()
         {
-            var head = Camera.main;
-            if (head == null)
+            if (Head == null)
                 return;
             transform.SetParent(null, true);
-            transform.position = head.transform.position
-                + head.transform.forward * editorDistance
-                + head.transform.right * editorOffset.x
-                + head.transform.up * editorOffset.y;
-            transform.rotation = Quaternion.LookRotation(transform.position - head.transform.position, Vector3.up);
+            transform.position = Head.transform.position
+                + Head.transform.forward * editorDistance
+                + Head.transform.right * editorOffset.x
+                + Head.transform.up * editorOffset.y;
+            transform.rotation = Quaternion.LookRotation(transform.position - Head.transform.position, Vector3.up);
             transform.localScale = Vector3.one * editorScale;
         }
 #endif
@@ -148,12 +157,11 @@ namespace MixedRealityProject.Drawing
 #endif
             if (!UnityEngine.XR.XRSettings.isDeviceActive || HandAnchor == null)
                 return;
-            var head = Camera.main;
-            if (head == null)
+            if (Head == null)
                 return;
             var position = HandAnchor.position + Vector3.up * heightAboveHand;
             transform.position = position;
-            var toPanel = position - head.transform.position;
+            var toPanel = position - Head.transform.position;
             if (toPanel.sqrMagnitude > 1e-6f)
                 transform.rotation = Quaternion.LookRotation(toPanel.normalized, Vector3.up);
         }
@@ -162,11 +170,21 @@ namespace MixedRealityProject.Drawing
         {
             if (penButton == null)
                 return;
-            penButton.material.SetColor(BaseColorId, StrokeSettings.Tool == ToolMode.Pen ? AccentColor : ButtonColor);
-            fillButton.material.SetColor(BaseColorId, StrokeSettings.Tool == ToolMode.Fill ? AccentColor : ButtonColor);
-            eraserButton.material.SetColor(BaseColorId, StrokeSettings.Tool == ToolMode.Eraser ? AccentColor : ButtonColor);
-            for (int i = 0; i < brushButtons.Length; i++)
-                brushButtons[i].material.SetColor(BaseColorId, (int)StrokeSettings.Type == i ? AccentColor : ButtonColor);
+            // Strumento corrente: aggiorna i colori solo quando cambia, non per frame.
+            if (StrokeSettings.Tool != lastTool)
+            {
+                lastTool = StrokeSettings.Tool;
+                penButton.material.SetColor(BaseColorId, lastTool == ToolMode.Pen ? AccentColor : ButtonColor);
+                fillButton.material.SetColor(BaseColorId, lastTool == ToolMode.Fill ? AccentColor : ButtonColor);
+                eraserButton.material.SetColor(BaseColorId, lastTool == ToolMode.Eraser ? AccentColor : ButtonColor);
+            }
+            if ((int)StrokeSettings.Type != lastType)
+            {
+                lastType = (int)StrokeSettings.Type;
+                for (int i = 0; i < brushButtons.Length; i++)
+                    brushButtons[i].material.SetColor(BaseColorId, lastType == i ? AccentColor : ButtonColor);
+            }
+            // I toggle si auto-aggiornano solo al cambio (vedi MakeToggleButton).
             foreach (var sync in toggleSync)
                 sync();
         }
@@ -324,6 +342,7 @@ namespace MixedRealityProject.Drawing
                 ("redo", StrokeHistory.Redo),
                 ("save", DrawingStore.Save),
                 ("load", DrawingStore.Load),
+                ("clear", DrawingStore.NewScene), // svuota la scena (con backup automatico)
             };
             const float bSize = 0.040f, bGap = 0.010f;
             int n = actions.Length;
@@ -373,7 +392,18 @@ namespace MixedRealityProject.Drawing
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
             MakeLabel(b.transform, label, new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center);
             var r = b.GetComponent<Renderer>();
-            toggleSync.Add(() => r.material.SetColor(BaseColorId, isOn() ? AccentColor : ButtonColor));
+            // Aggiorna il colore solo quando lo stato del toggle cambia davvero.
+            bool initialized = false;
+            bool last = false;
+            toggleSync.Add(() =>
+            {
+                bool on = isOn();
+                if (initialized && on == last)
+                    return;
+                initialized = true;
+                last = on;
+                r.material.SetColor(BaseColorId, on ? AccentColor : ButtonColor);
+            });
         }
 
 

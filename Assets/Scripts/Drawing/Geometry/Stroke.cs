@@ -16,7 +16,9 @@ namespace MixedRealityProject.Drawing
     {
         // Un collider di presa ogni N campioni: abbastanza fitti da afferrare
         // il tratto in un punto qualsiasi, abbastanza radi da restare leggeri.
-        const int SamplesPerGrabCollider = 4;
+        // (8 invece di 4: dimezza il numero di GameObject/collider per tratto;
+        // il raggio di presa più generoso sotto compensa la maggiore spaziatura.)
+        const int SamplesPerGrabCollider = 8;
         // Passo del ricampionamento Catmull-Rom a fine tratto.
         const float SmoothSpacing = 0.005f;
 
@@ -26,10 +28,22 @@ namespace MixedRealityProject.Drawing
         StrokeRecord record;
         BrushType brushType;
         float currentRadius;
+        float startRadius;        // raggio al momento di Begin(), usato per il LOD
         int samplesSinceCollider;
 
+        // LOD adattivo: tratti sottili usano meno lati (risparmio vertici),
+        // tratti spessi ne usano di più (sembrano più rotondi).
         // Il Nastro è il "tubo" degenere a 2 lati: due facce contrapposte.
-        int MeshSides => brushType == BrushType.Ribbon ? 2 : 8;
+        int MeshSides
+        {
+            get
+            {
+                if (brushType == BrushType.Ribbon) return 2;
+                if (startRadius < 0.003f) return 6;   // tratto sottile (<3 mm)
+                if (startRadius > 0.008f) return 12;  // tratto spesso (>8 mm)
+                return 8;                              // spessore medio
+            }
+        }
 
         readonly List<Vector3> rawPoints = new();
         readonly List<float> rawRadii = new();
@@ -42,6 +56,7 @@ namespace MixedRealityProject.Drawing
         {
             var stroke = Create(StrokeSettings.Color, StrokeSettings.Type);
             stroke.currentRadius = radius;
+            stroke.startRadius = radius; // memorizzato per il LOD adattivo di MeshSides
             stroke.mesher.AddPoint(start, radius);
             stroke.rawPoints.Add(start);
             stroke.rawRadii.Add(radius);
@@ -170,12 +185,15 @@ namespace MixedRealityProject.Drawing
             if (type != BrushType.Glow)
                 type = BrushType.Round;
 
-            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = "StrokePoint";
-            sphere.GetComponent<SphereCollider>().isTrigger = true;
+            // Sfera low-poly condivisa invece della primitiva Unity (~515 vert):
+            // stesso raggio (0.5) e collider, una frazione dei vertici.
+            var sphere = new GameObject("StrokePoint");
+            sphere.AddComponent<MeshFilter>().sharedMesh = BrushMeshes.Sphere();
+            sphere.AddComponent<MeshRenderer>().sharedMaterial = BrushMaterials.Get(color, type);
+            var pointCollider = sphere.AddComponent<SphereCollider>();
+            pointCollider.isTrigger = true; // raggio default 0.5 (locale) = mesh
             sphere.transform.position = position;
             sphere.transform.localScale = Vector3.one * radius * 3f;
-            sphere.GetComponent<MeshRenderer>().material = BrushMaterials.Get(color, type);
             sphere.AddComponent<DrawnItem>();
             var record = sphere.AddComponent<StrokeRecord>();
             record.isPoint = true;
@@ -228,15 +246,16 @@ namespace MixedRealityProject.Drawing
         }
 
         // Cap sferico: chiude l'estremità del tubo e arrotonda l'attacco, stile Tilt Brush.
+        // Usa la sfera low-poly condivisa (niente primitiva da ~515 vert, niente
+        // collider da creare e subito distruggere) e il materiale condiviso del tratto.
         void AddCap(Vector3 position, float radius)
         {
-            var cap = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            cap.name = "Cap";
-            Destroy(cap.GetComponent<Collider>());
+            var cap = new GameObject("Cap");
             cap.transform.SetParent(transform, false);
             cap.transform.position = position;
             cap.transform.localScale = Vector3.one * radius * 2f;
-            cap.GetComponent<MeshRenderer>().material = material;
+            cap.AddComponent<MeshFilter>().sharedMesh = BrushMeshes.Sphere();
+            cap.AddComponent<MeshRenderer>().sharedMaterial = material;
         }
 
         void AddGrabCollider(Vector3 position, float radius)
@@ -246,7 +265,9 @@ namespace MixedRealityProject.Drawing
             go.transform.position = position;
             var collider = go.AddComponent<SphereCollider>();
             collider.isTrigger = true; // niente interferenze con la fisica della scena
-            collider.radius = Mathf.Max(radius * 1.5f, 0.015f);
+            // Raggio più generoso: con i collider più radi (ogni 8 campioni) serve
+            // più copertura per non lasciare "buchi" dove il tratto non si afferra.
+            collider.radius = Mathf.Max(radius * 1.5f, 0.022f);
         }
     }
 }

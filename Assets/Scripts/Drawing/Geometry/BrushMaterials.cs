@@ -18,12 +18,26 @@ namespace MixedRealityProject.Drawing
         static readonly Dictionary<(Color, BrushType), Material> cache = new();
         static Texture2D dashTexture;
 
+        // I colori arrivano da slider/ruota HSV continui: senza quantizzazione ogni
+        // tinta leggermente diversa creerebbe un Material distinto mai liberato, e la
+        // cache crescerebbe senza limite (un materiale per tratto). Arrotondando a 32
+        // livelli per canale la cache resta proporzionale ai colori VISIBILMENTE
+        // distinti usati, non al numero di tratti — differenza impercettibile a occhio.
+        const float ColorLevels = 32f;
+
+        static Color Quantize(Color c) => new(
+            Mathf.Round(c.r * ColorLevels) / ColorLevels,
+            Mathf.Round(c.g * ColorLevels) / ColorLevels,
+            Mathf.Round(c.b * ColorLevels) / ColorLevels,
+            Mathf.Round(c.a * ColorLevels) / ColorLevels);
+
         public static Material Get(Color color, BrushType type = BrushType.Round)
         {
             // Round e Ribbon condividono lo stesso materiale.
             if (type == BrushType.Ribbon)
                 type = BrushType.Round;
 
+            color = Quantize(color);
             if (cache.TryGetValue((color, type), out var cached))
                 return cached;
 
@@ -37,7 +51,11 @@ namespace MixedRealityProject.Drawing
             {
                 case BrushType.Glow:
                     material.EnableKeyword("_EMISSION");
-                    material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+                    // Su Quest URP non c'è GI realtime: marcare l'emissione come
+                    // RealtimeEmissive non serve a nulla (e accenderebbe un percorso GI
+                    // inutile). L'effetto "brilla" arriva dal Bloom nel Volume
+                    // post-process; qui basta l'emissione HDR sul materiale.
+                    material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
                     material.SetColor("_EmissionColor", (Color)(new Vector4(color.r, color.g, color.b, 1f) * 2.5f));
                     break;
                 case BrushType.Dashed:
@@ -52,6 +70,20 @@ namespace MixedRealityProject.Drawing
 
             cache[(color, type)] = material;
             return material;
+        }
+
+        /// <summary>
+        /// Svuota la cache e distrugge i materiali generati. Chiamato all'avvio del
+        /// rig: in editor con il "Reload Domain" disattivato i campi static
+        /// sopravvivono tra le sessioni di Play e conserverebbero riferimenti a
+        /// materiali ormai distrutti. Sul device gira una volta all'avvio (innocuo).
+        /// </summary>
+        public static void ClearCache()
+        {
+            foreach (var material in cache.Values)
+                if (material != null)
+                    Object.Destroy(material);
+            cache.Clear();
         }
 
         /// <summary>

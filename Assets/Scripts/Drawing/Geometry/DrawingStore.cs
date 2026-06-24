@@ -39,6 +39,16 @@ namespace MixedRealityProject.Drawing
         public static string FilePath =>
             Path.Combine(Application.persistentDataPath, "drawing.json");
 
+        /// <summary>Copia di sicurezza salvata prima di un'operazione distruttiva (Load/Clear).</summary>
+        public static string BackupPath =>
+            Path.Combine(Application.persistentDataPath, "drawing_backup.json");
+
+        /// <summary>
+        /// Esporta la scena corrente come file OBJ standard in [persistentDataPath]/drawing.obj.
+        /// Vedi DrawingExporter per i dettagli del formato.
+        /// </summary>
+        public static void ExportOBJ() => DrawingExporter.ExportToFile();
+
         public static void Save()
         {
             // Solo gli oggetti attivi: i tratti annullati con undo non si salvano.
@@ -97,6 +107,37 @@ namespace MixedRealityProject.Drawing
             return items;
         }
 
+        /// <summary>
+        /// Salva una copia di sicurezza della scena corrente in BackupPath, prima di
+        /// un'operazione che la cancella (Load o Clear). Recupero: rinominare
+        /// drawing_backup.json in drawing.json e premere Load. Niente da salvare → no-op.
+        /// </summary>
+        public static void SaveBackup()
+        {
+            var records = new List<StrokeRecord>(
+                UnityEngine.Object.FindObjectsByType<StrokeRecord>(FindObjectsSortMode.None));
+            if (records.Count == 0)
+                return;
+            var file = new FileData { items = Capture(records) };
+            File.WriteAllText(BackupPath, JsonUtility.ToJson(file));
+            Debug.Log($"[DrawingStore] Backup di {file.items.Count} oggetti in {BackupPath}");
+        }
+
+        /// <summary>
+        /// Nuovo disegno: svuota la scena (history + tutti gli oggetti disegnati),
+        /// salvando prima un backup automatico così un tocco accidentale su Clear non
+        /// distrugge il lavoro in modo irreversibile.
+        /// </summary>
+        public static void NewScene()
+        {
+            SaveBackup();
+            StrokeHistory.Clear();
+            foreach (var item in UnityEngine.Object.FindObjectsByType<DrawnItem>(
+                         FindObjectsInactive.Include, FindObjectsSortMode.None))
+                UnityEngine.Object.Destroy(item.gameObject);
+            Debug.Log("[DrawingStore] Scena svuotata (backup salvato in drawing_backup.json).");
+        }
+
         public static void Load()
         {
             if (!File.Exists(FilePath))
@@ -106,7 +147,9 @@ namespace MixedRealityProject.Drawing
             }
             var file = JsonUtility.FromJson<FileData>(File.ReadAllText(FilePath));
 
-            // Si riparte puliti: via la history e ogni oggetto disegnato rimasto.
+            // Backup della scena corrente prima di sovrascriverla, poi si riparte puliti:
+            // via la history e ogni oggetto disegnato rimasto.
+            SaveBackup();
             StrokeHistory.Clear();
             foreach (var item in UnityEngine.Object.FindObjectsByType<DrawnItem>(
                          FindObjectsInactive.Include, FindObjectsSortMode.None))
