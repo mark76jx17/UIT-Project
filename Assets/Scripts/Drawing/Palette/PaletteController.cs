@@ -75,6 +75,14 @@ namespace MixedRealityProject.Drawing
         Renderer[] recentSwatches;
         readonly List<System.Action> toggleSync = new();
 
+        // Sotto-pannello "Options" (impostazioni). Vive a parte rispetto a `panel` così un
+        // Rebuild del pannello principale (es. al toggle mancino) non distrugge il controllo
+        // sotto la punta del pennello. Il suo sync dei toggle sta in una lista separata che
+        // NON viene svuotata dal Rebuild.
+        GameObject optionsPanel;
+        bool optionsOpen;
+        readonly List<System.Action> optionsSync = new();
+
         // Camera.main fa una FindGameObjectWithTag interna a ogni chiamata: la testa
         // non cambia, quindi la cachiamo una volta invece di interrogarla per frame.
         Camera head;
@@ -96,6 +104,7 @@ namespace MixedRealityProject.Drawing
             transform.localRotation = Quaternion.Euler(localEuler);
             gameObject.AddComponent<UiFeedback>(); // suono + vibrazione centralizzati per la palette
             BuildPanel();
+            BuildOptionsPanel(); // sotto-pannello impostazioni (separato, sopravvive ai Rebuild)
             // Tutti i controlli appena creati vanno sul layer della palette (per il ray).
             SetLayerRecursively(gameObject, PaletteLayer);
             StrokeSettings.RecentColorsChanged += RefreshRecents;
@@ -165,6 +174,14 @@ namespace MixedRealityProject.Drawing
             bool active = visibility > 0.001f;
             if (panel.activeSelf != active)
                 panel.SetActive(active);
+
+            // Il popup Options segue il pannello: visibile solo se aperto E la palette è aperta.
+            if (optionsPanel != null)
+            {
+                bool show = optionsOpen && active;
+                if (optionsPanel.activeSelf != show)
+                    optionsPanel.SetActive(show);
+            }
         }
 
         void LateUpdate()
@@ -213,6 +230,9 @@ namespace MixedRealityProject.Drawing
             }
             // I toggle si auto-aggiornano solo al cambio (vedi MakeToggleButton).
             foreach (var sync in toggleSync)
+                sync();
+            // Toggle del sotto-pannello Options (lista separata, non azzerata dal Rebuild).
+            foreach (var sync in optionsSync)
                 sync();
         }
 
@@ -393,7 +413,58 @@ namespace MixedRealityProject.Drawing
 
             eraserButton = MakeToolButton("Erase", "eraser", toolCells[2],
                 () => StrokeSettings.Tool = ToolMode.Eraser);
-        }  
+        }
+
+        // Ricostruisce il pannello principale (es. dopo il toggle "Left-Handed Mode": le
+        // strisce pennelli/azioni si specchiano sul nuovo lato). Il sotto-pannello Options
+        // è separato e resta intatto: il controllo sotto la punta non viene distrutto.
+        public void Rebuild()
+        {
+            if (panel != null)
+                Destroy(panel);
+            toggleSync.Clear();
+            lastTool = (ToolMode)(-1);
+            lastType = -1;
+            BuildPanel();
+            SetLayerRecursively(gameObject, PaletteLayer);
+            RefreshRecents();
+        }
+
+        // Sotto-pannello impostazioni, aperto/chiuso dal bottone "Options" (icona tre
+        // puntini nella striscia azioni). Figlio della palette accanto a `panel`, così
+        // sopravvive ai Rebuild. Per ora contiene solo il toggle "Left-Handed Mode";
+        // è il punto d'estensione per le impostazioni future della palette.
+        void BuildOptionsPanel()
+        {
+            var size = new Vector2(0.20f, 0.13f);
+            optionsPanel = MakeRounded(transform, "OptionsPanel", new Vector3(0f, 0f, -0.02f),
+                size, 0.02f, PanelColor, QueuePanel);
+
+            MakeLabel(optionsPanel.transform, "Options",
+                new Vector3(0f, size.y * 0.5f - 0.022f, -0.004f),
+                new Vector2(size.x, 0.022f), SliderLabelFont, TextAlignmentOptions.Center);
+
+            var toggleCell = new Cell
+            {
+                Center = new Vector3(0f, -0.012f, -0.004f),
+                Size = new Vector2(size.x - 0.03f, 0.045f)
+            };
+            MakeToggleButton("Left-Handed", toggleCell,
+                () => StrokeSettings.LeftHanded,
+                () => StrokeSettings.LeftHanded = !StrokeSettings.LeftHanded,
+                optionsPanel.transform, optionsSync);
+
+            SetLayerRecursively(optionsPanel, PaletteLayer);
+            optionsPanel.SetActive(false);
+        }
+
+        void ToggleOptionsPanel()
+        {
+            optionsOpen = !optionsOpen;
+            if (optionsPanel != null)
+                optionsPanel.SetActive(optionsOpen);
+            UiFeedback.Instance?.PanelToggle(optionsOpen);
+        }
 
         static void SetLayerRecursively(GameObject go, int layer)
         {
@@ -424,7 +495,10 @@ namespace MixedRealityProject.Drawing
 
             float contentH = visibleCount * bSize + (visibleCount - 1) * bGap;
             var stripSize = new Vector2(bSize + 0.014f, contentH + 0.014f);
-            float stripX = -panelSize.x * 0.5f - 0.012f - stripSize.x * 0.5f;
+            // Striscia pennelli sul lato della mano che disegna: destra per i destri
+            // (X negativa col pannello ruotato di 180°), sinistra per i mancini.
+            float side = StrokeSettings.LeftHanded ? 1f : -1f;
+            float stripX = side * (panelSize.x * 0.5f + 0.012f + stripSize.x * 0.5f);
 
             var strip = MakeRounded(panel.transform, "BrushStrip", new Vector3(stripX, 0f, 0f),
                 stripSize, 0.016f, PanelColor, QueuePanel);
@@ -476,6 +550,7 @@ namespace MixedRealityProject.Drawing
                 ("save",  "save",       DrawingStore.Save),
                 ("load",  "load",       DrawingStore.Load),
                 ("clear", "delete all", DrawingStore.NewScene),
+                ("options", "Options",  ToggleOptionsPanel), // apre il menu impostazioni
             };
 
             const float bSize = 0.058f, bGap = 0.012f;
@@ -484,7 +559,9 @@ namespace MixedRealityProject.Drawing
             int n = actions.Length;
             float contentH = n * bSize + (n - 1) * bGap;
             var stripSize = new Vector2(bSize + 0.014f, contentH + 0.014f);
-            float stripX = panelSize.x * 0.5f + 0.012f + stripSize.x * 0.5f;
+            // Striscia azioni sul lato opposto a quella dei pennelli (mano della palette).
+            float side = StrokeSettings.LeftHanded ? -1f : 1f;
+            float stripX = side * (panelSize.x * 0.5f + 0.012f + stripSize.x * 0.5f);
 
             var strip = MakeRounded(panel.transform, "ActionStrip", new Vector3(stripX, 0f, 0f),
                 stripSize, 0.016f, PanelColor, QueuePanel);
@@ -565,9 +642,15 @@ namespace MixedRealityProject.Drawing
         }
 
         // Toggle compatto: bottone che si illumina (accent) quando attivo. Niente pillola.
+        // I toggle del pannello principale usano panel.transform + toggleSync (svuotato dal
+        // Rebuild); il sotto-pannello Options passa il proprio parent e la propria lista.
         void MakeToggleButton(string label, Cell cell, System.Func<bool> isOn, System.Action onToggle)
+            => MakeToggleButton(label, cell, isOn, onToggle, panel.transform, toggleSync);
+
+        void MakeToggleButton(string label, Cell cell, System.Func<bool> isOn, System.Action onToggle,
+            Transform parent, List<System.Action> sync)
         {
-            var b = MakeRoundedButton(panel.transform, label + "Toggle", cell.Center, cell.Size,
+            var b = MakeRoundedButton(parent, label + "Toggle", cell.Center, cell.Size,
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
             // È un toggle: il feedback userà il suono on/off in base al nuovo stato.
             b.GetComponent<PaletteButton>().ToggleState = isOn;
@@ -576,7 +659,7 @@ namespace MixedRealityProject.Drawing
             // Aggiorna il colore solo quando lo stato del toggle cambia davvero.
             bool initialized = false;
             bool last = false;
-            toggleSync.Add(() =>
+            sync.Add(() =>
             {
                 bool on = isOn();
                 if (initialized && on == last)

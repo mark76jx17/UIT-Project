@@ -10,8 +10,18 @@ namespace MixedRealityProject.Drawing
     /// </summary>
     public class DrawingRig : MonoBehaviour
     {
-        [Tooltip("Per i mancini: pennello sulla mano sinistra, palette sulla destra.")]
+        [Tooltip("Per i mancini: pennello sulla mano sinistra, palette sulla destra. " +
+                 "Solo valore di prima esecuzione: in-app si cambia dal menu Options e " +
+                 "la scelta viene salvata (vedi StrokeSettings.LeftHanded).")]
         [SerializeField] bool leftHanded;
+
+        // Riferimenti tenuti per riapplicare la mano dominante a runtime (toggle Options)
+        // senza ricreare l'intero rig: si riagganciano pennello/palette/grab alle ancore
+        // opposte e la palette rifà il layout speculare.
+        Transform leftHandAnchor, rightHandAnchor, eyeAnchor;
+        GameObject brushGO, paletteGO, paletteGrabGO;
+        GrabController brushGrab, paletteGrab;
+        PaletteController palette;
 
         void Start()
         {
@@ -22,44 +32,49 @@ namespace MixedRealityProject.Drawing
             StrokeHistory.Clear();
             BrushMaterials.ClearCache();
 
-            StrokeSettings.BrushHand = leftHanded ? OVRInput.Controller.LTouch : OVRInput.Controller.RTouch;
-            StrokeSettings.PaletteHand = leftHanded ? OVRInput.Controller.RTouch : OVRInput.Controller.LTouch;
+            StrokeSettings.LoadLeftHanded(leftHanded); // ripristina la mano dominante salvata
             StrokeSettings.LoadRecentColors(); // ripristina i 5 colori recenti salvati
 
             // Su Mac/editor senza runtime XR il rig può venire disattivato dal
             // Meta SDK: in quel caso si ripiega sulla camera principale
             // (modalità desktop, pennello mosso dal simulatore).
             var rig = FindAnyObjectByType<OVRCameraRig>(FindObjectsInactive.Include);
-            var eyeAnchor = rig != null ? rig.centerEyeAnchor
+            eyeAnchor = rig != null ? rig.centerEyeAnchor
                 : Camera.main != null ? Camera.main.transform : null;
-            var brushAnchor = rig != null ? (leftHanded ? rig.leftHandAnchor : rig.rightHandAnchor) : null;
-            var paletteAnchor = rig != null ? (leftHanded ? rig.rightHandAnchor : rig.leftHandAnchor) : eyeAnchor;
+            leftHandAnchor = rig != null ? rig.leftHandAnchor : null;
+            rightHandAnchor = rig != null ? rig.rightHandAnchor : null;
+            var brushAnchor = BrushAnchor();
+            var paletteAnchor = PaletteAnchor();
 
             if (rig == null)
                 Debug.LogWarning("[DrawingRig] OVRCameraRig non trovato: modalità desktop con Camera.main.");
 
-            var brushGO = new GameObject("Brush");
+            brushGO = new GameObject("Brush");
             if (brushAnchor != null)
                 brushGO.transform.SetParent(brushAnchor, false);
             var brush = brushGO.AddComponent<BrushController>();
-            var brushGrab = brushGO.AddComponent<GrabController>();
+            brushGrab = brushGO.AddComponent<GrabController>();
             brushGrab.Controller = StrokeSettings.BrushHand;
             brushGrab.TipProbe = brush.Tip; // selezione precisa anche con la punta del pennello
             brushGO.AddComponent<PaletteRay>().Brush = brush; // interazione a distanza con la palette
 
             if (paletteAnchor != null && paletteAnchor != eyeAnchor)
             {
-                var paletteGrabGO = new GameObject("PaletteHandGrab");
+                paletteGrabGO = new GameObject("PaletteHandGrab");
                 paletteGrabGO.transform.SetParent(paletteAnchor, false);
-                paletteGrabGO.AddComponent<GrabController>().Controller = StrokeSettings.PaletteHand;
+                paletteGrab = paletteGrabGO.AddComponent<GrabController>();
+                paletteGrab.Controller = StrokeSettings.PaletteHand;
             }
 
-            var paletteGO = new GameObject("Palette");
+            paletteGO = new GameObject("Palette");
             if (paletteAnchor != null)
                 paletteGO.transform.SetParent(paletteAnchor, false);
-            var palette = paletteGO.AddComponent<PaletteController>();
+            palette = paletteGO.AddComponent<PaletteController>();
             palette.Brush = brush;
             palette.HandAnchor = paletteAnchor;
+
+            // Toggle "Left-Handed Mode" dal menu Options: riapplica le mani a runtime.
+            StrokeSettings.LeftHandedChanged += ApplyHandedness;
 
             // I tratti usano materiali Lit: senza nemmeno una luce in scena
             // resterebbero al buio (in MR/passthrough non c'è skybox).
@@ -91,6 +106,45 @@ namespace MixedRealityProject.Drawing
                 palette.localEuler = Vector3.zero;
             }
 #endif
+        }
+
+        void OnDestroy() => StrokeSettings.LeftHandedChanged -= ApplyHandedness;
+
+        // Ancore in base alla mano dominante. Senza rig (desktop) le ancore mani sono
+        // null e la palette ripiega sulla camera, come all'avvio.
+        Transform BrushAnchor() => StrokeSettings.LeftHanded ? leftHandAnchor : rightHandAnchor;
+
+        Transform PaletteAnchor()
+        {
+            if (leftHandAnchor == null && rightHandAnchor == null)
+                return eyeAnchor;
+            return StrokeSettings.LeftHanded ? rightHandAnchor : leftHandAnchor;
+        }
+
+        // Riapplica la mano dominante a runtime (toggle "Left-Handed Mode" del menu Options):
+        // riassegna i controller, riaggancia pennello/palette/grab alle ancore opposte e fa
+        // rifare alla palette il layout speculare. I tratti disegnati sono oggetti del mondo
+        // indipendenti, quindi non vengono toccati.
+        void ApplyHandedness()
+        {
+            var brushAnchor = BrushAnchor();
+            var paletteAnchor = PaletteAnchor();
+
+            if (brushGrab != null)
+                brushGrab.Controller = StrokeSettings.BrushHand;
+            if (paletteGrab != null)
+                paletteGrab.Controller = StrokeSettings.PaletteHand;
+
+            if (brushGO != null && brushAnchor != null)
+                brushGO.transform.SetParent(brushAnchor, false);
+            if (paletteGrabGO != null && paletteAnchor != null && paletteAnchor != eyeAnchor)
+                paletteGrabGO.transform.SetParent(paletteAnchor, false);
+
+            if (palette != null)
+            {
+                palette.HandAnchor = paletteAnchor;
+                palette.Rebuild(); // strisce sul lato della mano che disegna
+            }
         }
     }
 }

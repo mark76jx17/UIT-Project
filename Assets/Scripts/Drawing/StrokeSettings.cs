@@ -157,6 +157,49 @@ namespace MixedRealityProject.Drawing
             PlayerPrefs.Save();
         }
 
+        // ---- Mano dominante (mancino/destro, persiste tra le sessioni) ----
+        // Stesso schema dei colori recenti: PlayerPrefs + evento per aggiornare la UI.
+        // Unica fonte di verità per BrushHand/PaletteHand: il setter li riassegna.
+
+        const string LeftHandedKey = "drawing.leftHanded";
+        static bool leftHanded;
+
+        /// <summary>Notifica chi deve riconfigurarsi quando cambia la mano dominante
+        /// (DrawingRig riaggancia pennello/palette, la palette rifà il layout).</summary>
+        public static System.Action LeftHandedChanged;
+
+        /// <summary>Mancino: pennello a sinistra, palette a destra. Scrivendo qui si
+        /// applicano subito le mani, si salva la preferenza e si notifica la UI.</summary>
+        public static bool LeftHanded
+        {
+            get => leftHanded;
+            set
+            {
+                if (leftHanded == value)
+                    return;
+                leftHanded = value;
+                ApplyHands();
+                PlayerPrefs.SetInt(LeftHandedKey, value ? 1 : 0);
+                PlayerPrefs.Save();
+                LeftHandedChanged?.Invoke();
+            }
+        }
+
+        /// <summary>Assegna BrushHand/PaletteHand in base a <see cref="LeftHanded"/>.</summary>
+        static void ApplyHands()
+        {
+            BrushHand = leftHanded ? OVRInput.Controller.LTouch : OVRInput.Controller.RTouch;
+            PaletteHand = leftHanded ? OVRInput.Controller.RTouch : OVRInput.Controller.LTouch;
+        }
+
+        /// <summary>Carica la preferenza salvata (chiamato all'avvio da DrawingRig).
+        /// <paramref name="defaultValue"/> = valore di prima esecuzione (campo Inspector).</summary>
+        public static void LoadLeftHanded(bool defaultValue)
+        {
+            leftHanded = PlayerPrefs.GetInt(LeftHandedKey, defaultValue ? 1 : 0) == 1;
+            ApplyHands();
+        }
+
         static bool ApproximatelyEqual(Color a, Color b) =>
             Mathf.Abs(a.r - b.r) < 0.02f &&
             Mathf.Abs(a.g - b.g) < 0.02f &&

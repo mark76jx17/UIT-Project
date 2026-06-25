@@ -31,6 +31,7 @@ namespace MixedRealityProject.Drawing
                 case "save": SaveLoad(down: true); break;
                 case "load": SaveLoad(down: false); break;
                 case "clear": Trash(); break;
+                case "options": Ellipsis(); break;
                 default: Disc(Vector2.zero, 0.4f); break;
             }
 
@@ -86,6 +87,14 @@ namespace MixedRealityProject.Drawing
             Vector2 n = new(-tangent.y, tangent.x);
             Vector2 baseC = tip - tangent * 0.04f;
             Tri(tip + tangent * 0.26f, baseC + n * 0.20f, baseC - n * 0.20f);
+        }
+
+        // Tre puntini orizzontali (menu "Options"): coerente con gli altri glifi SDF.
+        static void Ellipsis()
+        {
+            Disc(new(-0.34f, 0f), 0.13f);
+            Disc(new(0f, 0f), 0.13f);
+            Disc(new(0.34f, 0f), 0.13f);
         }
 
         static void Trash()
