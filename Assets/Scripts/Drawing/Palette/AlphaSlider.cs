@@ -9,7 +9,7 @@ namespace MixedRealityProject.Drawing
     /// passthrough (niente più see-through). Il pomello indica l'alpha scelto; si usa
     /// toccandolo con la punta del pennello (visore) o trascinando (simulatore).
     /// </summary>
-    public class AlphaSlider : MonoBehaviour
+    public class AlphaSlider : MonoBehaviour, IPaletteControl
     {
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         static Texture2D rampTexture;

@@ -112,11 +112,10 @@ namespace MixedRealityProject.Drawing
             var go = new GameObject("Fill");
             go.AddComponent<MeshFilter>().mesh = mesh;
             go.AddComponent<MeshRenderer>().material = material;
-            // Collider convesso: la forma riempita si può afferrare anche al centro.
-            var collider = go.AddComponent<MeshCollider>();
-            collider.convex = true;
-            collider.isTrigger = true;
-            collider.sharedMesh = mesh;
+            // Niente collider sul riempimento: un MeshCollider convesso su una forma
+            // concava (es. "C", stella) coprirebbe l'intero inviluppo, rendendo
+            // imprecisi presa e gomma. La forma si afferra/cancella dal contorno
+            // (il tratto), che ha già i suoi collider.
             return go;
         }
 

@@ -37,6 +37,22 @@ namespace MixedRealityProject.Drawing
         Bounds bounds;
         bool boundsInitialized;
 
+        // Orientamento del primo anello: se impostato (es. dal Nastro), allinea la
+        // sezione all'"alto" del controller invece di una perpendicolare arbitraria,
+        // così ruotando il polso si controlla l'inclinazione del nastro.
+        public Vector3? UpHint;
+
+        // Scala della coordinata V (lunghezza). Per il tratteggio: V più piccola =
+        // trattini più lunghi, così si possono rendere proporzionali allo spessore.
+        public float UvScale = 1f;
+
+        // Upload a OGNI punto: con UploadEvery>1 la linea cresceva a blocchetti (scatti)
+        // mentre si disegna. La smoothness vince sul risparmio (che si nota solo su tratti
+        // lunghissimi). Il vero rimedio O(n) sarebbe l'upload incrementale del solo range
+        // nuovo (Mesh.SetVertexBufferData) — da fare con calma e test.
+        int sinceUpload;
+        const int UploadEvery = 1;
+
         public TubeMesher(Mesh mesh, int sides = 8)
         {
             this.mesh = mesh;
@@ -51,9 +67,17 @@ namespace MixedRealityProject.Drawing
 
         public void AddPoint(Vector3 point, float radius)
         {
-            if (AddPointNoUpload(point, radius))
+            if (!AddPointNoUpload(point, radius))
+                return;
+            if (++sinceUpload >= UploadEvery)
+            {
+                sinceUpload = 0;
                 Upload();
+            }
         }
+
+        /// <summary>Forza l'upload dei punti accumulati ma non ancora caricati (fine tratto).</summary>
+        public void Flush() => Upload();
 
         /// <summary>Aggiunta in blocco (ricostruzioni: smoothing, caricamento) con un solo upload.</summary>
         public void AddRange(IReadOnlyList<Vector3> points, IReadOnlyList<float> radii)
@@ -70,6 +94,11 @@ namespace MixedRealityProject.Drawing
             if (vertices.Count + 2 * sides > MaxVertices)
                 return false;
 
+            // Guardia: punti coincidenti (da JSON o ricampionamento) darebbero tangente
+            // nulla → anello degenere/NaN. Si saltano.
+            if (path.Count > 0 && (point - path[^1]).sqrMagnitude < 1e-10f)
+                return false;
+
             path.Add(point);
             EncapsulateBounds(point, radius);
 
@@ -84,7 +113,7 @@ namespace MixedRealityProject.Drawing
             if (path.Count == 2)
             {
                 var firstTangent = (path[1] - path[0]).normalized;
-                frameNormal = ArbitraryPerpendicular(firstTangent);
+                frameNormal = InitialFrame(firstTangent);
                 AddRing(path[0], firstTangent, firstRadius, 0f);
             }
 
@@ -105,7 +134,7 @@ namespace MixedRealityProject.Drawing
                 var dir = Mathf.Cos(angle) * frameNormal + Mathf.Sin(angle) * binormal;
                 vertices.Add(center + dir * radius);
                 normals.Add(dir);
-                uvs.Add(new Vector2((float)i / sides, v));
+                uvs.Add(new Vector2((float)i / sides, v * UvScale));
             }
         }
 
@@ -142,6 +171,19 @@ namespace MixedRealityProject.Drawing
             {
                 bounds.Encapsulate(pointBounds);
             }
+        }
+
+        // Primo frame: allineato a UpHint (proiettato perpendicolare alla tangente) se
+        // disponibile, altrimenti una perpendicolare arbitraria.
+        Vector3 InitialFrame(Vector3 tangent)
+        {
+            if (UpHint.HasValue)
+            {
+                var projected = UpHint.Value - tangent * Vector3.Dot(UpHint.Value, tangent);
+                if (projected.sqrMagnitude > 1e-6f)
+                    return projected.normalized;
+            }
+            return ArbitraryPerpendicular(tangent);
         }
 
         static Vector3 ParallelTransport(Vector3 normal, Vector3 newTangent)

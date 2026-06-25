@@ -28,21 +28,33 @@ namespace MixedRealityProject.Drawing
         StrokeRecord record;
         BrushType brushType;
         float currentRadius;
-        float startRadius;        // raggio al momento di Begin(), usato per il LOD
+        float startRadius;        // raggio al momento di Begin()
+        float lodRadius;          // raggio MASSIMO del tratto: decide i lati della mesh
+        Vector3 frameUp;          // "alto" del controller a inizio tratto: orienta il Nastro
         int samplesSinceCollider;
 
         // LOD adattivo: tratti sottili usano meno lati (risparmio vertici),
         // tratti spessi ne usano di più (sembrano più rotondi).
         // Il Nastro è il "tubo" degenere a 2 lati: due facce contrapposte.
+        // Si usa il raggio MASSIMO (non quello iniziale): in modalità pressione un
+        // tratto che parte sottile e si ingrossa non resta sfaccettato.
         int MeshSides
         {
             get
             {
                 if (brushType == BrushType.Ribbon) return 2;
-                if (startRadius < 0.003f) return 6;   // tratto sottile (<3 mm)
-                if (startRadius > 0.008f) return 12;  // tratto spesso (>8 mm)
-                return 8;                              // spessore medio
+                if (lodRadius < 0.003f) return 6;   // tratto sottile (<3 mm)
+                if (lodRadius > 0.008f) return 12;  // tratto spesso (>8 mm)
+                return 8;                            // spessore medio
             }
+        }
+
+        static float MaxRadius(IReadOnlyList<float> radii)
+        {
+            float m = 0f;
+            for (int i = 0; i < radii.Count; i++)
+                if (radii[i] > m) m = radii[i];
+            return m;
         }
 
         readonly List<Vector3> rawPoints = new();
@@ -52,11 +64,15 @@ namespace MixedRealityProject.Drawing
         public int PointCount => mesher.PointCount;
 
         /// <summary>Inizia un nuovo tratto con colore e pennello correnti della palette.</summary>
-        public static Stroke Begin(Vector3 start, float radius)
+        public static Stroke Begin(Vector3 start, float radius, Vector3 up)
         {
             var stroke = Create(StrokeSettings.Color, StrokeSettings.Type);
             stroke.currentRadius = radius;
-            stroke.startRadius = radius; // memorizzato per il LOD adattivo di MeshSides
+            stroke.startRadius = radius;
+            stroke.lodRadius = radius; // aggiornato al massimo a fine tratto (Finish)
+            stroke.frameUp = up;
+            stroke.mesher.UpHint = up.sqrMagnitude > 1e-6f ? up : (Vector3?)null;
+            stroke.mesher.UvScale = stroke.brushType == BrushType.Dashed ? DashUvScale(radius) : 1f;
             stroke.mesher.AddPoint(start, radius);
             stroke.rawPoints.Add(start);
             stroke.rawRadii.Add(radius);
@@ -82,6 +98,7 @@ namespace MixedRealityProject.Drawing
 
         public void Finish()
         {
+            mesher.Flush(); // carica gli ultimi anelli rimasti per il throttling dell'upload
             if (rawPoints.Count >= 4)
             {
                 // Lisciatura: ricampiona la polilinea e rigenera la mesh in un
@@ -91,8 +108,13 @@ namespace MixedRealityProject.Drawing
                 StrokeSmoothing.Resample(rawPoints, rawRadii, SmoothSpacing, smoothPoints, smoothRadii);
                 ApplyTaper(smoothPoints, smoothRadii);
 
+                // I lati della mesh definitiva dipendono dal raggio massimo del tratto
+                // (la rastrematura riduce gli estremi: si usa il max PRIMA del taper).
+                lodRadius = MaxRadius(rawRadii);
                 filter.mesh.Clear();
                 mesher = new TubeMesher(filter.mesh, MeshSides);
+                mesher.UpHint = frameUp.sqrMagnitude > 1e-6f ? frameUp : (Vector3?)null;
+                mesher.UvScale = brushType == BrushType.Dashed ? DashUvScale(lodRadius) : 1f;
                 mesher.AddRange(smoothPoints, smoothRadii);
 
                 rawPoints.Clear();
@@ -175,6 +197,84 @@ namespace MixedRealityProject.Drawing
             return CreateFill();
         }
 
+        // Tratteggio proporzionale allo spessore: più spesso → trattini più lunghi.
+        static float DashUvScale(float radius)
+            => Mathf.Clamp(0.005f / Mathf.Max(radius, 0.001f), 0.3f, 2f);
+
+        /// <summary>
+        /// Cancellazione PARZIALE: toglie i punti entro 'radius' da 'center' e ricostruisce
+        /// i segmenti rimasti come nuovi tratti (0, 1 o 2 pezzi). Ritorna true se ha tolto
+        /// qualcosa; 'pieces' sono i nuovi oggetti. Il chiamante nasconde l'originale.
+        /// Salta tratti-punto e tratti riempiti (per quelli si cancella tutto).
+        /// </summary>
+        public bool TryEraseSphere(Vector3 center, float radius, out List<GameObject> pieces)
+        {
+            pieces = new List<GameObject>();
+            if (record == null || record.isPoint || record.filled || rawPoints.Count < 2)
+                return false;
+
+            // I punti sono in spazio locale del tratto: porto centro e raggio lì.
+            Vector3 localCenter = transform.InverseTransformPoint(center);
+            float scale = Mathf.Max(Mathf.Abs(transform.lossyScale.x), 1e-4f);
+            float r2 = (radius / scale) * (radius / scale);
+
+            var runP = new List<Vector3>();
+            var runR = new List<float>();
+            bool removedAny = false;
+            for (int i = 0; i < rawPoints.Count; i++)
+            {
+                if ((rawPoints[i] - localCenter).sqrMagnitude <= r2)
+                {
+                    removedAny = true;
+                    EmitPiece(runP, runR, pieces);
+                }
+                else
+                {
+                    runP.Add(rawPoints[i]);
+                    runR.Add(rawRadii[i]);
+                }
+            }
+            EmitPiece(runP, runR, pieces);
+            return removedAny;
+        }
+
+        // Ricostruisce un pezzo dai punti rimasti e lo riallinea alla posa dell'originale.
+        void EmitPiece(List<Vector3> p, List<float> r, List<GameObject> pieces)
+        {
+            if (p.Count >= 2)
+            {
+                var piece = Rebuild(p.ToArray(), r.ToArray(), record.color, record.brushType);
+                piece.transform.SetPositionAndRotation(transform.position, transform.rotation);
+                piece.transform.localScale = transform.localScale;
+                pieces.Add(piece.gameObject);
+            }
+            p.Clear();
+            r.Clear();
+        }
+
+        /// <summary>
+        /// Riempimento di un anello formato da PIÙ tratti uniti (magnete): concatena i
+        /// contorni dei tratti figli di 'root' e, se l'anello è chiuso, costruisce la
+        /// superficie. Ritorna il fill o null (contorno aperto/degenere → nessun danno).
+        /// </summary>
+        public static GameObject FillGroup(Transform root, Color color, float closeThreshold)
+        {
+            var strokes = root.GetComponentsInChildren<Stroke>();
+            if (strokes.Length < 2)
+                return null;
+            var pts = new List<Vector3>();
+            foreach (var s in strokes)
+                foreach (var p in s.rawPoints)
+                    pts.Add(root.InverseTransformPoint(s.transform.TransformPoint(p)));
+            if (pts.Count < 3 || Vector3.Distance(pts[0], pts[^1]) > closeThreshold)
+                return null;
+            var fill = FillSurface.Build(pts, BrushMaterials.Get(color, BrushType.Round));
+            if (fill == null)
+                return null;
+            fill.transform.SetParent(root, false);
+            return fill;
+        }
+
         /// <summary>Punto singolo (tap del trigger): una sfera.</summary>
         public static GameObject CreatePoint(Vector3 position, float radius)
             => CreatePoint(position, radius, StrokeSettings.Color, StrokeSettings.Type);
@@ -208,6 +308,13 @@ namespace MixedRealityProject.Drawing
             Color color, BrushType type)
         {
             var stroke = Create(color, type);
+            // Lati corretti in base al raggio massimo salvato (Create parte a 6 lati):
+            // ricrea il mesher prima di riempirlo, o i tratti caricati sarebbero sempre
+            // a 6 lati anche se spessi.
+            stroke.lodRadius = MaxRadius(radii);
+            stroke.filter.mesh.Clear();
+            stroke.mesher = new TubeMesher(stroke.filter.mesh, stroke.MeshSides);
+            stroke.mesher.UvScale = type == BrushType.Dashed ? DashUvScale(stroke.lodRadius) : 1f;
             stroke.mesher.AddRange(points, radii);
             stroke.rawPoints.AddRange(points);
             stroke.rawRadii.AddRange(radii);

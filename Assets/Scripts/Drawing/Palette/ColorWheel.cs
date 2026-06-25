@@ -9,7 +9,7 @@ namespace MixedRealityProject.Drawing
     /// Un pomello bianco mostra la selezione corrente e si sincronizza anche
     /// quando il colore cambia da tastiera.
     /// </summary>
-    public class ColorWheel : MonoBehaviour
+    public class ColorWheel : MonoBehaviour, IPaletteControl
     {
         float radius;
         Transform knob;

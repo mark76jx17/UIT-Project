@@ -7,7 +7,7 @@ namespace MixedRealityProject.Drawing
     /// colori: gradiente nero→bianco generato in codice, pomello che segue il
     /// valore corrente. Si usa toccandolo (visore) o trascinando (simulatore).
     /// </summary>
-    public class BrightnessSlider : MonoBehaviour
+    public class BrightnessSlider : MonoBehaviour, IPaletteControl
     {
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 

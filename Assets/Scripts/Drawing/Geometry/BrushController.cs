@@ -38,7 +38,7 @@ namespace MixedRealityProject.Drawing
         [Header("Spessore")]
         [Range(0f, 1f)]
         [Tooltip("Frazione minima del raggio premendo appena (solo con Pressure ON).")]
-        [SerializeField] float minPressureFraction = 0.25f;
+        [SerializeField] float minPressureFraction = 0.10f;
         [Range(0f, 1f)]
         [Tooltip("Quanto velocemente il raggio insegue la pressione (1 = subito).")]
         [SerializeField] float radiusSmoothing = 0.3f;
@@ -51,6 +51,10 @@ namespace MixedRealityProject.Drawing
         [Header("Fill (secchiello)")]
         [Tooltip("Distanza massima tra gli estremi perché un tratto sia 'chiuso' e riempibile.")]
         [SerializeField] float fillCloseThreshold = 0.05f;
+
+        [Header("Gomma")]
+        [Tooltip("Raggio entro cui la gomma toglie i punti del tratto (cancellazione parziale).")]
+        [SerializeField] float eraseRadius = 0.03f;
 
         [Header("Campionamento adattivo")]
         [Tooltip("Velocità controller (m/s) oltre cui la distanza minima scende al valore minimo.")]
@@ -106,6 +110,18 @@ namespace MixedRealityProject.Drawing
         Transform cursor;
         Material cursorMaterial;
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        static readonly int BaseMapId = Shader.PropertyToID("_BaseMap");
+
+        // HUD sulla punta: icona dello strumento corrente (penna/secchiello/gomma),
+        // così sai in che modalità sei senza guardare la palette.
+        Transform cursorIcon;
+        Material cursorIconMat;
+        ToolMode lastIconTool = (ToolMode)(-1);
+        Transform headCached;
+
+        // Anteprima gomma (oggetto sotto la punta) e hint del magnete (punto di aggancio).
+        Transform eraseHover;
+        Transform snapHint;
 
         void Awake()
         {
@@ -132,6 +148,32 @@ namespace MixedRealityProject.Drawing
             cursorMaterial = BrushMaterials.CreateUnlit(StrokeSettings.Color);
             cursorGO.GetComponent<MeshRenderer>().material = cursorMaterial;
             cursor = cursorGO.transform;
+
+            // Icona dello strumento, fluttuante sopra la punta e rivolta alla testa.
+            // Non figlia del cursore (che scala con lo spessore): non deve ingrandirsi.
+            var iconGO = new GameObject("CursorTool");
+            iconGO.transform.SetParent(transform, false);
+            iconGO.transform.localPosition = tipOffset + new Vector3(0f, 0.035f, 0f);
+            iconGO.AddComponent<MeshFilter>().mesh = RoundedMesh.TexturedQuad(0.02f, 0.02f);
+            cursorIconMat = BrushMaterials.CreateUnlit(Color.white);
+            iconGO.AddComponent<MeshRenderer>().material = cursorIconMat;
+            cursorIcon = iconGO.transform;
+
+            // Hint del magnete: piccola sfera nel punto dove il prossimo tratto si
+            // aggancerebbe a un oggetto esistente. In world space, posizionata a runtime.
+            var snapGO = new GameObject("SnapHint");
+            snapGO.AddComponent<MeshFilter>().sharedMesh = BrushMeshes.Sphere();
+            snapGO.AddComponent<MeshRenderer>().material =
+                BrushMaterials.CreateUnlit(new Color(0.55f, 0.45f, 0.95f, 0.85f));
+            snapGO.transform.localScale = Vector3.one * 0.02f;
+            snapHint = snapGO.transform;
+            snapHint.gameObject.SetActive(false);
+        }
+
+        void OnDestroy()
+        {
+            if (snapHint != null)
+                Destroy(snapHint.gameObject); // non è figlio del rig: va liberato a mano
         }
 
         void Update()
@@ -150,6 +192,26 @@ namespace MixedRealityProject.Drawing
             }
 
             UpdateCursor(trigger);
+            UpdateCursorIcon();
+
+            // Aiuti visivi che vanno spenti ogni frame e riaccesi solo dove servono.
+            if (snapHint != null)
+                snapHint.gameObject.SetActive(false);
+            if (!StrokeSettings.EraserMode && eraseHover != null)
+            {
+                StrokeHighlight.Clear(eraseHover);
+                eraseHover = null;
+            }
+
+            // Contagocce: tenendo A/X (mano del pennello) con la punta vicino a un tratto
+            // se ne preleva il colore. Non disegna mentre prelevi.
+            if (OVRInput.Get(OVRInput.Button.One, StrokeSettings.BrushHand))
+            {
+                if (pressed)
+                    EndPress(position);
+                PickColorAt(position);
+                return;
+            }
 
             // Mentre il ray punta la palette (o altro consumer lo richiede) il pennello
             // non disegna: chiudi un eventuale tratto in corso ed esci.
@@ -188,6 +250,7 @@ namespace MixedRealityProject.Drawing
                 // Cambio modalità a metà tratto: chiudi il tratto in corso.
                 if (pressed)
                     EndPress(position);
+                UpdateEraseHover(position); // evidenzia in rosso cosa cancellerai
                 if (trigger >= pressThreshold)
                     EraseAt(position);
                 return;
@@ -199,6 +262,8 @@ namespace MixedRealityProject.Drawing
                 EndPress(position);
             else if (pressed)
                 ContinuePress(position, trigger);
+            else
+                UpdateSnapHint(position); // pen mode, fermo: mostra dove si aggancerebbe
         }
 
         /// <summary>
@@ -226,11 +291,78 @@ namespace MixedRealityProject.Drawing
 
         void UpdateCursor(float trigger)
         {
-            float preview = pressed ? currentRadius
-                : TriggerToRadius(Mathf.Max(trigger, pressThreshold));
+            // Mentre disegni: spessore reale corrente. Fermo: mostra lo spessore BASE
+            // (massimo in modalità pressione), non il minimo — prima il cursore in
+            // pressione mostrava sempre il 25% ed era fuorviante.
+            float preview = pressed ? currentRadius : StrokeSettings.FixedRadius;
             cursor.localScale = Vector3.one * preview * 2f;
             cursorMaterial.SetColor(BaseColorId,
                 StrokeSettings.EraserMode ? EraserCursorColor : StrokeSettings.Color);
+        }
+
+        // Icona dello strumento sulla punta: cambia texture solo al cambio di strumento,
+        // si nasconde mentre disegni e si gira verso la testa.
+        void UpdateCursorIcon()
+        {
+            if (cursorIcon == null)
+                return;
+            var tool = StrokeSettings.Tool;
+            if (tool != lastIconTool)
+            {
+                lastIconTool = tool;
+                string icon = tool == ToolMode.Eraser ? "eraser"
+                            : tool == ToolMode.Fill ? "droplet" : "pencil";
+                cursorIconMat.SetTexture(BaseMapId, ToolIcon.Get(icon));
+            }
+            bool show = !IsDrawing;
+            if (cursorIcon.gameObject.activeSelf != show)
+                cursorIcon.gameObject.SetActive(show);
+            if (!show)
+                return;
+            if (headCached == null && Camera.main != null)
+                headCached = Camera.main.transform;
+            if (headCached != null)
+            {
+                var dir = cursorIcon.position - headCached.position;
+                if (dir.sqrMagnitude > 1e-6f)
+                    cursorIcon.rotation = Quaternion.LookRotation(dir, Vector3.up);
+            }
+        }
+
+        // Evidenzia in rosso l'oggetto che la gomma cancellerebbe sotto la punta.
+        void UpdateEraseHover(Vector3 position)
+        {
+            Transform found = FindNearbyItem(position, out var target, out _) ? target : null;
+            if (eraseHover == found)
+                return;
+            if (eraseHover != null)
+                StrokeHighlight.Clear(eraseHover);
+            eraseHover = found;
+            if (eraseHover != null)
+                StrokeHighlight.SetEraseHover(eraseHover);
+        }
+
+        // Contagocce: preleva il colore del tratto sotto la punta e lo imposta come corrente.
+        void PickColorAt(Vector3 position)
+        {
+            if (FindNearbyItem(position, out var target, out _))
+            {
+                var record = target.GetComponentInChildren<StrokeRecord>();
+                if (record != null)
+                    StrokeSettings.SetColor(record.color);
+            }
+        }
+
+        // Mostra dove il prossimo tratto si aggancerebbe a un oggetto esistente (magnete).
+        void UpdateSnapHint(Vector3 position)
+        {
+            if (snapHint == null || !mergeNearbyStrokes)
+                return;
+            if (FindNearbyItem(position, out _, out var snapped))
+            {
+                snapHint.position = snapped;
+                snapHint.gameObject.SetActive(true);
+            }
         }
 
         void BeginPress(Vector3 position, float trigger)
@@ -257,19 +389,28 @@ namespace MixedRealityProject.Drawing
             pressTime = Time.time;
             smoothed = position;
             prevPosition = position;
-            current = Stroke.Begin(position, currentRadius);
-            mirrored = Mirror.Enabled ? Stroke.Begin(Mirror.Reflect(position), currentRadius) : null;
+            Vector3 up = transform.up; // "alto" del controller: orienta il Nastro
+            current = Stroke.Begin(position, currentRadius, up);
+            mirrored = Mirror.Enabled ? Stroke.Begin(Mirror.Reflect(position), currentRadius, up) : null;
         }
 
         void ContinuePress(Vector3 position, float trigger)
         {
-            currentRadius = Mathf.Lerp(currentRadius, TriggerToRadius(trigger), radiusSmoothing);
+            // Anche l'inseguimento del raggio è reso indipendente dal frame-rate
+            // (come la posizione), così la pressione modula lo spessore allo stesso
+            // modo a 72/90/120 Hz e in editor.
+            float radiusAlpha = 1f - Mathf.Pow(1f - radiusSmoothing, Time.deltaTime * 72f);
+            currentRadius = Mathf.Lerp(currentRadius, TriggerToRadius(trigger), radiusAlpha);
             // Smoothing indipendente dal frame-rate: 'smoothing' è il peso per-frame a
             // 72 Hz (refresh di riferimento del Quest). Senza correzione, a 90/120 Hz il
             // tratto verrebbe più liscio che a 72 Hz (più Lerp al secondo) e diverso in
             // editor; l'esponente su Time.deltaTime normalizza il risultato.
             float smoothAlpha = 1f - Mathf.Pow(1f - smoothing, Time.deltaTime * 72f);
             smoothed = Vector3.Lerp(smoothed, position, smoothAlpha);
+
+            // Snap ad assi: vincola il tratto all'asse del mondo dominante (linee dritte).
+            if (StrokeSettings.SnapAxis)
+                smoothed = ConstrainToAxis(smoothed);
 
             // Campionamento adattivo alla velocità: movimenti veloci → distanza minima ridotta
             // (più campioni = maggiore fedeltà del tratto); movimenti lenti → distanza maggiore
@@ -343,8 +484,38 @@ namespace MixedRealityProject.Drawing
 
         void EraseAt(Vector3 position)
         {
-            if (FindNearbyItem(position, out var target, out _))
-                Destroy(target.gameObject);
+            if (!FindNearbyItem(position, out var target, out _))
+                return;
+            // Togli prima l'evidenziazione rossa, o riapparirebbe rossa dopo un undo.
+            StrokeHighlight.Clear(target);
+            if (eraseHover == target)
+                eraseHover = null;
+
+            // Cancellazione PARZIALE su un tratto semplice (non unito col magnete): toglie
+            // solo la porzione toccata e ricostruisce i pezzi rimasti. Altrimenti
+            // cancella tutto l'oggetto. In entrambi i casi è annullabile.
+            var strokes = target.GetComponentsInChildren<Stroke>();
+            if (strokes.Length == 1 && strokes[0].TryEraseSphere(position, eraseRadius, out var pieces))
+            {
+                target.gameObject.SetActive(false);
+                StrokeHistory.PushReplace(new[] { target.gameObject }, pieces.ToArray());
+            }
+            else
+            {
+                target.gameObject.SetActive(false);
+                StrokeHistory.PushErase(target.gameObject);
+            }
+            HapticPulse(hapticStrokeDuration, frequency: 0.5f, amplitude: 0.6f);
+        }
+
+        // Asse del mondo dominante dal punto di partenza: per disegnare linee dritte.
+        Vector3 ConstrainToAxis(Vector3 p)
+        {
+            Vector3 d = p - pressPosition;
+            float ax = Mathf.Abs(d.x), ay = Mathf.Abs(d.y), az = Mathf.Abs(d.z);
+            if (ax >= ay && ax >= az) return pressPosition + new Vector3(d.x, 0f, 0f);
+            if (ay >= az) return pressPosition + new Vector3(0f, d.y, 0f);
+            return pressPosition + new Vector3(0f, 0f, d.z);
         }
 
         // Secchiello: riempie il tratto chiuso puntato col colore corrente.
@@ -356,6 +527,8 @@ namespace MixedRealityProject.Drawing
             if (stroke == null)
                 return;
             var fill = stroke.FillWith(StrokeSettings.Color, fillCloseThreshold);
+            if (fill == null) // riprova: anello formato da più tratti uniti col magnete
+                fill = Stroke.FillGroup(target, StrokeSettings.Color, fillCloseThreshold);
             if (fill != null)
                 StrokeHistory.Push(fill);
         }

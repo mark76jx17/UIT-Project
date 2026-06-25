@@ -12,7 +12,7 @@ namespace MixedRealityProject.Drawing
     ///   click sinistro (tenuto)  = trigger / disegna; click rapido = punto
     ///   click su un pulsante della palette = lo preme (non disegna)
     ///   click destro (tenuto) su un tratto = lo trascina
-    ///   rotella                  = avvicina/allontana il pennello
+    ///   rotella                  = pressione (mentre disegni) / distanza pennello (a riposo)
     ///   1..8                     = colori della palette
     ///   , / .                    = pressione simulata giù/su (= spessore)
     ///   A                        = cicla la trasparenza (100/70/40%)
@@ -21,7 +21,10 @@ namespace MixedRealityProject.Drawing
     ///   F                        = strumento Riempi on/off (il contorno si riempie)
     ///   B                        = cicla il tipo di pennello (Tubo/Nastro/Glow/Tratto)
     ///   M                        = specchio/simmetria on/off
+    ///   G                        = griglia di riferimento a pavimento on/off
     ///   D                        = duplica l'oggetto sotto il cursore
+    ///   I                        = contagocce: preleva il colore dell'oggetto sotto il cursore
+    ///   P                        = apri/chiudi il pannello della palette
     ///   F5 / F9                  = salva / carica il disegno
     ///   N                        = nuovo disegno: svuota la scena (con backup automatico)
     ///   O                        = esporta scena come OBJ in persistentDataPath
@@ -72,41 +75,37 @@ namespace MixedRealityProject.Drawing
             if (mouse == null || keyboard == null || camera == null)
                 return;
 
-            distance = Mathf.Clamp(distance + mouse.scroll.ReadValue().y * 0.0005f, 0.2f, 3f);
+            // Rotella: mentre disegni regola la PRESSIONE (così provi la modulazione di
+            // spessore in editor); altrimenti avvicina/allontana il pennello.
+            float scrollY = mouse.scroll.ReadValue().y;
+            if (mouse.leftButton.isPressed)
+                pressure = Mathf.Clamp(pressure + scrollY * 0.001f, 0.55f, 1f);
+            else
+                distance = Mathf.Clamp(distance + scrollY * 0.0005f, 0.2f, 3f);
             var ray = camera.ScreenPointToRay(mouse.position.ReadValue());
             transform.position = ray.origin + ray.direction * distance;
 
             // Un solo raycast: cosa c'è sotto il cursore?
             PaletteButton hoveredButton = null;
-            ColorWheel hoveredWheel = null;
-            BrightnessSlider hoveredBright = null;
-            ColorSquare hoveredSquare = null;
-            HueBar hoveredHue = null;
+            IPaletteControl hoveredControl = null; // ruota colori / slider (dispatch unificato)
 
-            SizeSlider hoveredSizeSlider = null; // slider di dimensione
-            AlphaSlider hoveredAlphaSlider = null; // slider trasparenza
-
-            Transform hoveredItem = null;
+            Transform hoveredItem = null;   // oggetto disegnato (gomma/contagocce/hover)
+            Transform hoveredGrab = null;   // afferrabile (anche il piano specchio)
             if (Physics.Raycast(ray, out var hit, 10f))
             {
-                hit.collider.TryGetComponent(out hoveredSizeSlider); // slider di dimensione
-                hit.collider.TryGetComponent(out hoveredAlphaSlider);
-
                 hit.collider.TryGetComponent(out hoveredButton);
-                hit.collider.TryGetComponent(out hoveredWheel);
-                hit.collider.TryGetComponent(out hoveredBright);
-                hit.collider.TryGetComponent(out hoveredSquare);
-                hit.collider.TryGetComponent(out hoveredHue);
+                hit.collider.TryGetComponent<IPaletteControl>(out hoveredControl);
                 var item = hit.collider.GetComponentInParent<DrawnItem>();
                 if (item != null)
                     hoveredItem = item.transform;
+                hoveredGrab = GrabController.GrabRoot(hit.collider);
             }
             SetHover(hoveredItem);
 
-            // Tasto destro: trascina l'oggetto disegnato sotto il cursore.
-            if (mouse.rightButton.wasPressedThisFrame && hoveredItem != null)
+            // Tasto destro: trascina l'oggetto (o il piano specchio) sotto il cursore.
+            if (mouse.rightButton.wasPressedThisFrame && hoveredGrab != null)
             {
-                dragged = hoveredItem;
+                dragged = hoveredGrab;
                 dragDistance = hit.distance;
                 dragOffset = dragged.position - hit.point;
                 StrokeHighlight.Set(dragged, 1.45f);
@@ -134,34 +133,25 @@ namespace MixedRealityProject.Drawing
             }
 
             // Sopra il picker colore o gli slider, il click interagisce con loro invece di disegnare
-            else if (hoveredWheel != null || hoveredBright != null
-                     || hoveredSquare != null || hoveredHue != null
-                     || hoveredSizeSlider != null || hoveredAlphaSlider != null)
+            else if (hoveredControl != null)
             {
+                // Ruota colori o slider: il click trascina invece di disegnare.
                 brush.TriggerOverride = 0f;
                 if (mouse.leftButton.isPressed)
-                {
-                    if (hoveredWheel != null)
-                        hoveredWheel.PressAt(hit.point);
-                    else if (hoveredBright != null)
-                        hoveredBright.PressAt(hit.point);
-                    else if (hoveredSquare != null)
-                        hoveredSquare.PressAt(hit.point);
-                    else if (hoveredHue != null)
-                        hoveredHue.PressAt(hit.point);
-                    else if (hoveredSizeSlider != null)
-                        hoveredSizeSlider.PressAt(hit.point);
-                    else
-                        hoveredAlphaSlider.PressAt(hit.point);
-                }
+                    hoveredControl.PressAt(hit.point);
             }
 
             else if (StrokeSettings.EraserMode)
             {
-                // Gomma: il click cancella l'oggetto puntato.
+                // Gomma: il click nasconde l'oggetto puntato (cancellazione annullabile).
                 brush.TriggerOverride = 0f;
                 if (mouse.leftButton.wasPressedThisFrame && hoveredItem != null)
-                    Destroy(hoveredItem.gameObject);
+                {
+                    StrokeHighlight.Clear(hoveredItem);
+                    if (hovered == hoveredItem) hovered = null;
+                    hoveredItem.gameObject.SetActive(false);
+                    StrokeHistory.PushErase(hoveredItem.gameObject);
+                }
             }
             else
             {
@@ -183,6 +173,12 @@ namespace MixedRealityProject.Drawing
                     }
                 }
             }
+            if (keyboard.iKey.wasPressedThisFrame && hoveredItem != null)
+            {
+                // Contagocce: preleva il colore dell'oggetto sotto il cursore.
+                var record = hoveredItem.GetComponentInChildren<StrokeRecord>();
+                if (record != null) StrokeSettings.SetColor(record.color);
+            }
             if (keyboard.commaKey.wasPressedThisFrame) pressure = Mathf.Max(0.6f, pressure - 0.08f);
             if (keyboard.periodKey.wasPressedThisFrame) pressure = Mathf.Min(1f, pressure + 0.08f);
             if (keyboard.aKey.wasPressedThisFrame) CycleAlpha();
@@ -192,6 +188,8 @@ namespace MixedRealityProject.Drawing
                 StrokeSettings.Tool = StrokeSettings.FillMode ? ToolMode.Pen : ToolMode.Fill;
             if (keyboard.mKey.wasPressedThisFrame)
                 Mirror.Toggle(camera.transform);
+            if (keyboard.gKey.wasPressedThisFrame)
+                ReferenceGrid.Toggle(camera.transform);
             if (keyboard.bKey.wasPressedThisFrame)
                 StrokeSettings.Type = (BrushType)(((int)StrokeSettings.Type + 1) % 4);
             if (keyboard.f5Key.wasPressedThisFrame) DrawingStore.Save();

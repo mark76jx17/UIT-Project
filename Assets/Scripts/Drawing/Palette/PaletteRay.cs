@@ -28,6 +28,12 @@ namespace MixedRealityProject.Drawing
         LineRenderer line;
         bool wasPressed;
         bool startedOnPalette; // modalità "latchata" al fronte di salita del trigger
+        PaletteButton hoveredButton;
+
+        // Il raycast considera SOLO il layer della palette: ignora del tutto i tratti
+        // disegnati. Risolve anche il rischio che, in un disegno denso, il buffer di hit
+        // si riempisse di collider dei tratti prima di raggiungere il controllo.
+        static int PaletteMask => 1 << PaletteController.PaletteLayer;
 
         void Awake()
         {
@@ -74,12 +80,16 @@ namespace MixedRealityProject.Drawing
             if (!paletteActive)
             {
                 line.enabled = false;
+                SetHoveredButton(null);
                 return;
             }
 
             line.enabled = true;
             line.SetPosition(0, origin);
             line.SetPosition(1, hit.point);
+
+            // Hover: evidenzia il pulsante puntato anche prima di premere.
+            SetHoveredButton(hit.collider.GetComponent<PaletteButton>());
 
             if (!pressed)
                 return;
@@ -93,12 +103,21 @@ namespace MixedRealityProject.Drawing
                 if (justPressed)
                     button.Press();
             }
-            else if (go.TryGetComponent<ColorWheel>(out var wheel)) wheel.PressAt(hit.point);
-            else if (go.TryGetComponent<BrightnessSlider>(out var bright)) bright.PressAt(hit.point);
-            else if (go.TryGetComponent<ColorSquare>(out var square)) square.PressAt(hit.point);
-            else if (go.TryGetComponent<HueBar>(out var hue)) hue.PressAt(hit.point);
-            else if (go.TryGetComponent<AlphaSlider>(out var alpha)) alpha.PressAt(hit.point);
-            else if (go.TryGetComponent<SizeSlider>(out var size)) size.PressAt(hit.point);
+            else if (go.TryGetComponent<IPaletteControl>(out var control))
+            {
+                control.PressAt(hit.point);
+            }
+        }
+
+        void SetHoveredButton(PaletteButton button)
+        {
+            if (hoveredButton == button)
+                return;
+            if (hoveredButton != null)
+                hoveredButton.SetHover(false);
+            hoveredButton = button;
+            if (hoveredButton != null)
+                hoveredButton.SetHover(true);
         }
 
         // Cerca il controllo della palette più vicino lungo il raggio, ignorando
@@ -110,7 +129,7 @@ namespace MixedRealityProject.Drawing
         bool TryHitPalette(Vector3 origin, Vector3 dir, out RaycastHit best)
         {
             best = default;
-            int count = Physics.RaycastNonAlloc(origin, dir, rayBuffer, maxDistance, ~0, QueryTriggerInteraction.Collide);
+            int count = Physics.RaycastNonAlloc(origin, dir, rayBuffer, maxDistance, PaletteMask, QueryTriggerInteraction.Collide);
             float nearest = float.MaxValue;
             bool found = false;
             for (int i = 0; i < count; i++)
@@ -166,17 +185,12 @@ namespace MixedRealityProject.Drawing
 
             // Lancia un ray diretto verso il centro del button per ottenere l'hit esatto
             var snapDir = (bestCol.bounds.center - origin).normalized;
-            return Physics.Raycast(origin, snapDir, out result, maxDistance, ~0, QueryTriggerInteraction.Collide)
+            return Physics.Raycast(origin, snapDir, out result, maxDistance, PaletteMask, QueryTriggerInteraction.Collide)
                    && result.collider == bestCol;
         }
 
         static bool IsPaletteControl(GameObject go) =>
             go.GetComponent<PaletteButton>() != null
-            || go.GetComponent<ColorWheel>() != null
-            || go.GetComponent<BrightnessSlider>() != null
-            || go.GetComponent<ColorSquare>() != null
-            || go.GetComponent<HueBar>() != null
-            || go.GetComponent<AlphaSlider>() != null
-            || go.GetComponent<SizeSlider>() != null;
+            || go.GetComponent<IPaletteControl>() != null;
     }
 }

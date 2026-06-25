@@ -8,7 +8,7 @@ namespace MixedRealityProject.Drawing
     /// si capisce a colpo d'occhio che regola lo spessore del tratto. Il pomello indica
     /// il valore scelto. Tocco col pennello (visore) o trascinamento (simulatore).
     /// </summary>
-    public class SizeSlider : MonoBehaviour
+    public class SizeSlider : MonoBehaviour, IPaletteControl
     {
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 

@@ -34,6 +34,11 @@ namespace MixedRealityProject.Drawing
         public BrushController Brush { get; set; }
         public Transform HandAnchor { get; set; }
 
+        // Layer dedicato a TUTTI i controlli della palette: il PaletteRay raycasta solo
+        // questo, ignorando i tratti disegnati. È un user-layer libero (senza nome
+        // nell'Inspector, ma funzionale): cambialo se 30 fosse già usato nel progetto.
+        public const int PaletteLayer = 30;
+
         static readonly Color PanelColor = new(0.10f, 0.10f, 0.12f, 0.96f);
         static readonly Color ButtonColor = new(0.22f, 0.22f, 0.27f, 1f);
         static readonly Color AccentColor = new(0.55f, 0.45f, 0.95f, 1f);
@@ -63,6 +68,7 @@ namespace MixedRealityProject.Drawing
         GameObject panel;
         Renderer penButton, fillButton, eraserButton;
         Renderer[] brushButtons;
+        Material[] brushPreviewMats; // anteprime tratto: la selezionata si tinge col colore corrente
         Renderer[] recentSwatches;
         readonly List<System.Action> toggleSync = new();
 
@@ -86,6 +92,8 @@ namespace MixedRealityProject.Drawing
             transform.localPosition = localOffset;
             transform.localRotation = Quaternion.Euler(localEuler);
             BuildPanel();
+            // Tutti i controlli appena creati vanno sul layer della palette (per il ray).
+            SetLayerRecursively(gameObject, PaletteLayer);
             StrokeSettings.RecentColorsChanged += RefreshRecents;
             RefreshRecents();
 #if UNITY_EDITOR
@@ -120,6 +128,12 @@ namespace MixedRealityProject.Drawing
                 isOpen = !isOpen;
                 StartCoroutine(HapticPulse(0.04f));
             }
+#if UNITY_EDITOR
+            // Nel simulatore non c'è il trigger del visore: il tasto P apre/chiude.
+            if (UnityEngine.InputSystem.Keyboard.current != null
+                && UnityEngine.InputSystem.Keyboard.current.pKey.wasPressedThisFrame)
+                isOpen = !isOpen;
+#endif
 
             AnimateVisibility();
             SyncSelection();
@@ -183,6 +197,15 @@ namespace MixedRealityProject.Drawing
                 lastType = (int)StrokeSettings.Type;
                 for (int i = 0; i < brushButtons.Length; i++)
                     brushButtons[i].material.SetColor(BaseColorId, lastType == i ? AccentColor : ButtonColor);
+            }
+            // Indicatore "pennello corrente": l'anteprima del tipo selezionato è tinta col
+            // colore attuale (le altre restano bianche) → colore + tipo a colpo d'occhio.
+            if (brushPreviewMats != null)
+            {
+                var col = StrokeSettings.BaseColor;
+                col.a = 1f;
+                for (int i = 0; i < brushPreviewMats.Length; i++)
+                    brushPreviewMats[i].SetColor(BaseColorId, (int)StrokeSettings.Type == i ? col : Color.white);
             }
             // I toggle si auto-aggiornano solo al cambio (vedi MakeToggleButton).
             foreach (var sync in toggleSync)
@@ -298,11 +321,24 @@ namespace MixedRealityProject.Drawing
 
             layout.Gap(0.010f);
 
-            var mirrorRow = layout.Row(0.034f);
-            MakeToggleButton("Mirror", mirrorRow.Fill(),
+            var toggleRow = layout.Row(0.034f);
+            var toggleCells = toggleRow.Split(3);
+            MakeToggleButton("Mirror", toggleCells[0],
                 () => Mirror.Enabled,
-                () => Mirror.Toggle(Camera.main != null ? Camera.main.transform : transform));
+                () => Mirror.Toggle(Head != null ? Head.transform : transform));
+            MakeToggleButton("Grid", toggleCells[1],
+                () => ReferenceGrid.Enabled,
+                () => ReferenceGrid.Toggle(Head != null ? Head.transform : transform));
+            MakeToggleButton("Snap", toggleCells[2],
+                () => StrokeSettings.SnapAxis,
+                () => StrokeSettings.SnapAxis = !StrokeSettings.SnapAxis);
+        }
 
+        static void SetLayerRecursively(GameObject go, int layer)
+        {
+            go.layer = layer;
+            foreach (Transform child in go.transform)
+                SetLayerRecursively(child.gameObject, layer);
         }
 
         // Striscia verticale dei 4 tipi di pennello, ancorata a destra del pannello
@@ -319,6 +355,7 @@ namespace MixedRealityProject.Drawing
                 stripSize, 0.016f, PanelColor, QueuePanel);
 
             brushButtons = new Renderer[n];
+            brushPreviewMats = new Material[n];
             float y0 = (contentH - bSize) * 0.5f;
             for (int i = 0; i < n; i++)
             {
@@ -326,8 +363,8 @@ namespace MixedRealityProject.Drawing
                 float y = y0 - i * (bSize + bGap);
                 var b = MakeRoundedButton(strip.transform, type.ToString(), new Vector3(0f, y, -0.004f),
                     new Vector2(bSize, bSize), 0.011f, ButtonColor, () => StrokeSettings.Type = type);
-                MakeTexQuad(b.transform, BrushPreview.Get(type), new Vector3(0f, 0f, -0.004f),
-                    new Vector2(bSize * 0.74f, bSize * 0.44f));
+                brushPreviewMats[i] = MakeTexQuad(b.transform, BrushPreview.Get(type),
+                    new Vector3(0f, 0f, -0.004f), new Vector2(bSize * 0.74f, bSize * 0.44f));
                 brushButtons[i] = b.GetComponent<Renderer>();
             }
         }
@@ -408,7 +445,7 @@ namespace MixedRealityProject.Drawing
 
 
         // Quad con texture (anteprima tratto, ruota, ecc.) su materiale URP/Unlit.
-        void MakeTexQuad(Transform parent, Texture2D tex, Vector3 localPos, Vector2 size)
+        Material MakeTexQuad(Transform parent, Texture2D tex, Vector3 localPos, Vector2 size)
         {
             var go = new GameObject("Preview");
             go.transform.SetParent(parent, false);
@@ -418,6 +455,7 @@ namespace MixedRealityProject.Drawing
             mat.SetTexture("_BaseMap", tex);
             mat.renderQueue = QueueIcon;
             go.AddComponent<MeshRenderer>().material = mat;
+            return mat;
         }
 
         // Icona procedurale (ToolIcon) su quad URP/Unlit. Glifi bianchi coerenti,

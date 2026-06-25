@@ -102,13 +102,25 @@ namespace MixedRealityProject.Drawing
                 overlapBuffer, Physics.AllLayers, QueryTriggerInteraction.Collide);
             for (int i = 0; i < count; i++)
             {
-                var item = overlapBuffer[i].GetComponentInParent<DrawnItem>();
-                if (item == null)
+                var t = GrabRoot(overlapBuffer[i]);
+                if (t == null)
                     continue;
-                found = item.transform;
+                found = t;
                 break;
             }
             SetHover(found);
+        }
+
+        /// <summary>Radice afferrabile di un collider: un oggetto disegnato o il piano
+        /// specchio (MirrorHandle). Gomma/magnete cercano solo DrawnItem, quindi
+        /// ignorano lo specchio.</summary>
+        public static Transform GrabRoot(Collider col)
+        {
+            var item = col.GetComponentInParent<DrawnItem>();
+            if (item != null)
+                return item.transform;
+            var handle = col.GetComponentInParent<MirrorHandle>();
+            return handle != null ? handle.transform : null;
         }
 
         void SetHover(Transform target)
@@ -190,6 +202,7 @@ namespace MixedRealityProject.Drawing
                     var b = hands[1].transform.position;
                     float d0 = Vector3.Distance(a0, b0);
                     float scale = d0 > 1e-4f ? Vector3.Distance(a, b) / d0 : 1f;
+                    scale = Mathf.Clamp(scale, 0.1f, 10f); // niente collasso a zero o esplosione
                     var mid0 = (a0 + b0) * 0.5f;
                     var mid = (a + b) * 0.5f;
                     // Rotazione completa (incluso il roll): differenza tra il frame

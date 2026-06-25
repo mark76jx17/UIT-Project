@@ -49,6 +49,10 @@ namespace MixedRealityProject.Drawing
         /// <summary>Tipo di pennello corrente (vedi la riga pennelli della palette).</summary>
         public static BrushType Type = BrushType.Round;
 
+        /// <summary>Snap ad assi: il tratto viene vincolato all'asse del mondo dominante
+        /// rispetto al punto di partenza (linee dritte X/Y/Z). Toggle "Snap" in palette.</summary>
+        public static bool SnapAxis;
+
         //modalità dimensione
         public static SizeMode SizeMode = SizeMode.FixedPen;
 

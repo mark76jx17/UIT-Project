@@ -47,7 +47,11 @@ namespace MixedRealityProject.Drawing
         /// Esporta la scena corrente come file OBJ standard in [persistentDataPath]/drawing.obj.
         /// Vedi DrawingExporter per i dettagli del formato.
         /// </summary>
-        public static void ExportOBJ() => DrawingExporter.ExportToFile();
+        public static void ExportOBJ()
+        {
+            DrawingExporter.ExportToFile();
+            Toast.Show("Esportato OBJ");
+        }
 
         public static void Save()
         {
@@ -57,6 +61,7 @@ namespace MixedRealityProject.Drawing
             var file = new FileData { items = Capture(records) };
             File.WriteAllText(FilePath, JsonUtility.ToJson(file));
             Debug.Log($"[DrawingStore] Salvati {file.items.Count} oggetti in {FilePath}");
+            Toast.Show($"Salvato ✓ ({file.items.Count})");
         }
 
         /// <summary>
@@ -136,6 +141,7 @@ namespace MixedRealityProject.Drawing
                          FindObjectsInactive.Include, FindObjectsSortMode.None))
                 UnityEngine.Object.Destroy(item.gameObject);
             Debug.Log("[DrawingStore] Scena svuotata (backup salvato in drawing_backup.json).");
+            // Niente toast: la scena che si svuota è già feedback evidente.
         }
 
         public static void Load()
@@ -143,9 +149,18 @@ namespace MixedRealityProject.Drawing
             if (!File.Exists(FilePath))
             {
                 Debug.LogWarning($"[DrawingStore] Nessun salvataggio in {FilePath}");
+                Toast.Show("Nessun salvataggio");
                 return;
             }
-            var file = JsonUtility.FromJson<FileData>(File.ReadAllText(FilePath));
+
+            FileData file = null;
+            try { file = JsonUtility.FromJson<FileData>(File.ReadAllText(FilePath)); }
+            catch (System.Exception e) { Debug.LogError($"[DrawingStore] JSON illeggibile: {e.Message}"); }
+            if (file == null || file.items == null)
+            {
+                Toast.Show("Salvataggio illeggibile");
+                return;
+            }
 
             // Backup della scena corrente prima di sovrascriverla, poi si riparte puliti:
             // via la history e ogni oggetto disegnato rimasto.
@@ -157,6 +172,7 @@ namespace MixedRealityProject.Drawing
 
             var created = Instantiate(file.items);
             Debug.Log($"[DrawingStore] Caricati {created.Count} oggetti da {FilePath}");
+            Toast.Show($"Caricati {created.Count} oggetti");
         }
 
         static List<Transform> Instantiate(List<ItemData> items)

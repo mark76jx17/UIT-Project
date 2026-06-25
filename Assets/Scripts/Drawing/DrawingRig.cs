@@ -71,6 +71,10 @@ namespace MixedRealityProject.Drawing
                 lightGO.transform.rotation = Quaternion.Euler(55f, -30f, 0f);
             }
 
+            // Toast: messaggi a schermo (Salva/Carica/Svuota/Undo…), visibili sul visore.
+            if (FindAnyObjectByType<ToastController>() == null)
+                new GameObject("Toast").AddComponent<ToastController>();
+
 #if UNITY_EDITOR
             // Senza visore gli anchor restano fermi all'origine: il simulatore
             // muove il pennello col mouse e la palette viene appesa davanti

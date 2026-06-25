@@ -29,6 +29,7 @@ namespace MixedRealityProject.Drawing
 
         float lastPress = -1f;
         Vector3 baseScale;
+        bool hovered;
 
         void Awake()
         {
@@ -37,7 +38,21 @@ namespace MixedRealityProject.Drawing
         }
 
         void OnEnable() => Instances.Add(this);
-        void OnDisable() => Instances.Remove(this);
+        void OnDisable()
+        {
+            Instances.Remove(this);
+            hovered = false;
+        }
+
+        /// <summary>Evidenzia il pulsante quando il ray lo punta (prima di premerlo),
+        /// ingrandendolo un filo. Riduce i click sbagliati su bersagli piccoli.</summary>
+        public void SetHover(bool on)
+        {
+            if (hovered == on)
+                return;
+            hovered = on;
+            transform.localScale = on ? baseScale * 1.10f : baseScale;
+        }
 
         void OnTriggerEnter(Collider other)
         {
@@ -62,7 +77,7 @@ namespace MixedRealityProject.Drawing
             OVRInput.SetControllerVibration(0.5f, 0.5f, StrokeSettings.BrushHand);
             yield return new WaitForSeconds(HapticDuration);
             OVRInput.SetControllerVibration(0f, 0f, StrokeSettings.BrushHand);
-            transform.localScale = baseScale;
+            transform.localScale = hovered ? baseScale * 1.10f : baseScale;
         }
     }
 }
