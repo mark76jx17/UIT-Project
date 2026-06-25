@@ -53,8 +53,14 @@ namespace MixedRealityProject.Drawing
             if (Brush == null)
                 return;
 
-            Vector3 origin = transform.position;
-            Vector3 dir = transform.forward;
+            // Raggio allineato all'asse controller → punta del pennello: parte dalla
+            // pallina (BrushTip) ed è collineare con tip e controller, così "esce" da dove
+            // si punta visivamente. Prima partiva dal centro del controller lungo Z e, con
+            // la punta offset, appariva spostato di lato.
+            Vector3 origin = Brush.Tip != null ? Brush.Tip.position : transform.position;
+            Vector3 dir = Brush.Tip != null
+                ? (Brush.Tip.position - transform.position).normalized
+                : transform.forward;
 
             bool onPalette = TryHitPalette(origin, dir, out var hit);
 

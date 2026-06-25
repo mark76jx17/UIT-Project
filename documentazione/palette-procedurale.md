@@ -481,3 +481,14 @@ Verificato in anteprima editor (`Tools/Palette Preview` + screenshot): tre eleme
 
 > Aggiorna lo stato di §4.1: ruota, checker e slider luminosità sono allineati (stessa altezza
 > e centro); la label "Bright" è in una fascetta in alto sopra lo slider.
+
+### Step 14 — raggio palette allineato a tip↔controller (2026-06-25)
+Feedback utente: il raggio (`PaletteRay`) appariva **spostato di lato** e sganciato dalla
+pallina. Causa: partiva dal **centro del controller** (`origin = transform.position`) lungo
+`transform.forward`, mentre il `BrushTip` è offset (`tipOffset = (-0.012, -0.01, 0.08)`) →
+la linea non passava per la pallina. Fix in `PaletteRay.Update`: `origin = Brush.Tip.position`
+e `dir = (Tip.position − controller).normalized` → il raggio **parte dalla pallina** ed è
+**collineare con tip e controller** (esce da dove si punta visivamente). Fallback a
+`transform.forward` se `Tip` è null. Raycast e linea usano la stessa origine/direzione, quindi
+hit e visuale coincidono. Compila pulito; **da verificare in Play** (il raggio è runtime, non
+appare nell'anteprima editor).
