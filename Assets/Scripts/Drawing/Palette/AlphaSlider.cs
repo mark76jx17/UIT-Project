@@ -19,6 +19,13 @@ namespace MixedRealityProject.Drawing
         Transform knob;
         Material material;
 
+        bool built;
+
+        void Awake()
+        {
+            enabled = false;
+        }
+
         public void Build(Vector2 size)
         {
             width = size.x;
@@ -51,6 +58,9 @@ namespace MixedRealityProject.Drawing
             knobGO.AddComponent<MeshFilter>().mesh = RoundedMesh.Rect(kd, kd, kd * 0.5f);
             knobGO.AddComponent<MeshRenderer>().material = BrushMaterials.CreateUnlit(Color.white, opaque: true);
             knob = knobGO.transform;
+
+            built = true;
+            enabled = true;
         }
 
         public void PressAt(Vector3 worldPoint)
@@ -61,14 +71,14 @@ namespace MixedRealityProject.Drawing
 
         void Update()
         {
+            if (!built || knob == null || material == null)
+                return;
+
             knob.localPosition = new Vector3((StrokeSettings.Alpha - 0.5f) * width, 0f, -0.004f);
-            // Tinge la rampa col colore corrente in tempo reale: la rampa dà l'alpha 0→1.
-            if (material != null)
-            {
-                var c = StrokeSettings.BaseColor;
-                c.a = 1f;
-                material.SetColor(BaseColorId, c);
-            }
+
+            var c = StrokeSettings.BaseColor;
+            c.a = 1f;
+            material.SetColor(BaseColorId, c);
         }
 
         void OnTriggerStay(Collider other)

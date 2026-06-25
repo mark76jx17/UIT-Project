@@ -30,8 +30,14 @@ namespace MixedRealityProject.Drawing
         float zoomMax = 1.24f;
         float currentZoom = 1f;
 
+        bool built;
+
         public void SetProximityTarget(Transform target) => proximityTarget = target;
 
+        void Awake()
+        {
+            enabled = false;
+        }
         public void Build(float diameter, Color background, float maxZoom)
         {
             radius = diameter * 0.5f;
@@ -59,6 +65,9 @@ namespace MixedRealityProject.Drawing
             knobFilter.mesh = RoundedMesh.Rect(0.009f, 0.009f, 0.0045f);
             knobGO.AddComponent<MeshRenderer>().material = BrushMaterials.CreateUnlit(Color.white, opaque: true);
             knob = knobGO.transform;
+
+            built = true;
+            enabled = true;
         }
 
         public void PressAt(Vector3 worldPoint)
@@ -76,6 +85,9 @@ namespace MixedRealityProject.Drawing
 
         void Update()
         {
+            if (!built || knob == null || material == null)
+                return;
+
             float angle = StrokeSettings.Hue * Mathf.PI * 2f;
             float r = StrokeSettings.Sat * radius;
             knob.localPosition = new Vector3(Mathf.Cos(angle) * r, Mathf.Sin(angle) * r, -0.003f);
@@ -83,13 +95,12 @@ namespace MixedRealityProject.Drawing
             if (proximityTarget != null)
             {
                 float d = Vector3.Distance(proximityTarget.position, transform.position);
-                float near = Mathf.InverseLerp(FarDist, NearDist, d); // 1 vicino, 0 lontano
+                float near = Mathf.InverseLerp(FarDist, NearDist, d);
                 float target = Mathf.Lerp(ZoomMin, zoomMax, near);
                 currentZoom = Mathf.Lerp(currentZoom, target, 1f - Mathf.Exp(-12f * Time.deltaTime));
                 transform.localScale = Vector3.one * currentZoom;
             }
 
-            // La ruota segue la luminosità: rigenero la texture solo quando Val cambia.
             if (!Mathf.Approximately(builtVal, StrokeSettings.Val))
                 Regenerate();
         }

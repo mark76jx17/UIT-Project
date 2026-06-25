@@ -16,6 +16,13 @@ namespace MixedRealityProject.Drawing
         Texture2D texture;
         float builtHue = -1f, builtSat = -1f;
 
+        bool built;
+
+        void Awake()
+        {
+            enabled = false;
+        }
+
         public void Build(Vector2 size)
         {
             height = size.y;
@@ -39,6 +46,9 @@ namespace MixedRealityProject.Drawing
             knobGO.AddComponent<MeshRenderer>().material =
                 BrushMaterials.CreateUnlit(Color.white, opaque: true);
             knob = knobGO.transform;
+
+            built = true;
+            enabled = true;
         }
 
         public void PressAt(Vector3 worldPoint)
@@ -50,8 +60,11 @@ namespace MixedRealityProject.Drawing
 
         void Update()
         {
+            if (!built || knob == null || material == null)
+                return;
+
             knob.localPosition = new Vector3(0f, (StrokeSettings.Val - 0.5f) * height, -0.003f);
-            // La tinta puo cambiare dalla ruota: rigenero il gradiente solo se serve.
+
             if (!Mathf.Approximately(builtHue, StrokeSettings.Hue) ||
                 !Mathf.Approximately(builtSat, StrokeSettings.Sat))
                 Regenerate();

@@ -25,10 +25,10 @@ namespace MixedRealityProject.Drawing
         public float heightAboveHand = 0.22f;
 
 #if UNITY_EDITOR
-        [SerializeField] bool pinPaletteInEditor = false;
-        [SerializeField] float editorDistance = 0.72f;
-        [SerializeField] Vector3 editorOffset = new(0.0f, 0f, 0f);
-        [SerializeField] float editorScale = 1.25f;
+        [SerializeField] bool pinPaletteInEditor = true;
+        [SerializeField] float editorDistance = 0.75f;
+        [SerializeField] Vector3 editorOffset = new(-0.10f, 0.45f, 0f);
+        [SerializeField] float editorScale = 1.35f;
 #endif
 
         public BrushController Brush { get; set; }
@@ -55,8 +55,10 @@ namespace MixedRealityProject.Drawing
 
         // Dimensioni font (point-size TMP in unità locali metriche: ~0.003 m per unità).
         const float ButtonFont = 0.20f;   // Draw/Fill/Erase (riga larga)
-        const float ToggleFont = 0.24f;
+        const float ToggleFont = ButtonFont; // Pressure/Mirror/Grid/Snap uguali a Draw/Fill/Erase
         const float SliderLabelFont = 0.13f; // label degli slider: piccola ma leggibile
+
+        const float ToolSmallLabelFont = 0.13f;
 
         // Icone nei bottoni testuali (Draw/Fill/Erase, Undo/Redo/Save/Load): disattivate
         // su richiesta — solo label testuale. Il codice icone (ToolIcon/MakeIconImage)
@@ -115,8 +117,12 @@ namespace MixedRealityProject.Drawing
             transform.position = Head.transform.position
                 + Head.transform.forward * editorDistance
                 + Head.transform.right * editorOffset.x
-                + Head.transform.up * editorOffset.y;
-            transform.rotation = Quaternion.LookRotation(transform.position - Head.transform.position, Vector3.up);
+                + Vector3.up * editorOffset.y;
+            var toPanel = transform.position - Head.transform.position;
+            toPanel.y = 0f;
+
+            if (toPanel.sqrMagnitude > 1e-6f)
+                transform.rotation = Quaternion.LookRotation(toPanel.normalized, Vector3.up);
             transform.localScale = Vector3.one * editorScale;
         }
 #endif
@@ -224,7 +230,7 @@ namespace MixedRealityProject.Drawing
             panel = new GameObject("Panel");
             panel.transform.SetParent(transform, false);
 
-            var panelSize = new Vector2(0.26f, 0.46f);
+            var panelSize = new Vector2(0.26f, 0.48f);
             const float pad = 0.012f, rowGap = 0.008f, colGap = 0.012f, z = -0.002f;
 
             MakeRounded(panel.transform, "MainPanel", Vector3.zero, panelSize, 0.030f, PanelColor, QueuePanel);
@@ -347,30 +353,47 @@ namespace MixedRealityProject.Drawing
             layout.Gap(0.014f);
 
 
-            // ---------- TOOL ----------
-            var toolsRow = layout.Row(0.038f);
-            var toolCells = toolsRow.Split(3);
-            penButton = MakeTextButton("Draw", "pencil", toolCells[0],
-                () => StrokeSettings.Tool = ToolMode.Pen, ButtonFont);
-            fillButton = MakeTextButton("Fill", "droplet", toolCells[1],
-                () => StrokeSettings.Tool = ToolMode.Fill, ButtonFont);
-            eraserButton = MakeTextButton("Erase", "eraser", toolCells[2],
-                () => StrokeSettings.Tool = ToolMode.Eraser, ButtonFont);
-
-            layout.Gap(0.010f);
-
+            // ---------- MIRROR / GRID / SNAP ----------
             var toggleRow = layout.Row(0.034f);
             var toggleCells = toggleRow.Split(3);
+
             MakeToggleButton("Mirror", toggleCells[0],
                 () => Mirror.Enabled,
                 () => Mirror.Toggle(Head != null ? Head.transform : transform));
+
             MakeToggleButton("Grid", toggleCells[1],
                 () => ReferenceGrid.Enabled,
                 () => ReferenceGrid.Toggle(Head != null ? Head.transform : transform));
+
             MakeToggleButton("Snap", toggleCells[2],
                 () => StrokeSettings.SnapAxis,
                 () => StrokeSettings.SnapAxis = !StrokeSettings.SnapAxis);
-        }
+
+
+            // ---------- SEPARATOR ----------
+            layout.Gap(0.010f);
+
+            MakeRounded(panel.transform, "Sep3",
+                new Vector3(0f, layout.Cursor, z),
+                new Vector2(panelSize.x - pad * 2f, 0.002f),
+                0.001f, TrackColor, QueueControl);
+
+            layout.Gap(0.019f);
+
+
+            // ---------- TOOL ----------
+            var toolsRow = layout.Row(0.044f);
+            var toolCells = toolsRow.Split(3);
+
+            penButton = MakeToolButton("Draw", "pencil", toolCells[0],
+                () => StrokeSettings.Tool = ToolMode.Pen);
+
+            fillButton = MakeToolButton("Fill", "droplet", toolCells[1],
+                () => StrokeSettings.Tool = ToolMode.Fill);
+
+            eraserButton = MakeToolButton("Erase", "eraser", toolCells[2],
+                () => StrokeSettings.Tool = ToolMode.Eraser);
+        }  
 
         static void SetLayerRecursively(GameObject go, int layer)
         {
@@ -442,35 +465,81 @@ namespace MixedRealityProject.Drawing
             _ => type.ToString().ToLower()
         };
 
-        // Striscia verticale Undo/Redo/Save/Load, ancorata a destra del pannello.
-        // Solo icone (niente testo), per accorciare il pannello principale.
+        // Striscia verticale Redo/Undo/Save/Load/Delete all, ancorata a destra del pannello.
+        // Stessa dimensione dei bottoni pennello a sinistra: label piccola sopra + icona sotto.
         void BuildActionStrip(Vector2 panelSize)
         {
-            var actions = new (string name, System.Action action)[]
+            var actions = new (string name, string label, System.Action action)[]
             {
-                ("undo", StrokeHistory.Undo),
-                ("redo", StrokeHistory.Redo),
-                ("save", DrawingStore.Save),
-                ("load", DrawingStore.Load),
-                ("clear", DrawingStore.NewScene), // svuota la scena (con backup automatico)
+                ("redo",  "redo",       StrokeHistory.Redo),
+                ("undo",  "undo",       StrokeHistory.Undo),
+                ("save",  "save",       DrawingStore.Save),
+                ("load",  "load",       DrawingStore.Load),
+                ("clear", "delete all", DrawingStore.NewScene),
             };
-            const float bSize = 0.040f, bGap = 0.010f;
+
+            const float bSize = 0.058f, bGap = 0.012f;
+            const float ActionLabelFont = 0.10f;
+
             int n = actions.Length;
             float contentH = n * bSize + (n - 1) * bGap;
-            var stripSize = new Vector2(bSize + 0.012f, contentH + 0.012f);
+            var stripSize = new Vector2(bSize + 0.014f, contentH + 0.014f);
             float stripX = panelSize.x * 0.5f + 0.012f + stripSize.x * 0.5f;
 
             var strip = MakeRounded(panel.transform, "ActionStrip", new Vector3(stripX, 0f, 0f),
-                stripSize, 0.014f, PanelColor, QueuePanel);
+                stripSize, 0.016f, PanelColor, QueuePanel);
 
             float y0 = (contentH - bSize) * 0.5f;
+
             for (int i = 0; i < n; i++)
             {
                 float y = y0 - i * (bSize + bGap);
-                var b = MakeRoundedButton(strip.transform, actions[i].name, new Vector3(0f, y, -0.004f),
-                    new Vector2(bSize, bSize), 0.010f, ButtonColor, actions[i].action);
-                MakeIconImage(b.transform, actions[i].name, new Vector3(0f, 0f, -0.004f), bSize * 0.55f);
+
+                var b = MakeRoundedButton(strip.transform, actions[i].name,
+                    new Vector3(0f, y, -0.004f),
+                    new Vector2(bSize, bSize),
+                    0.013f,
+                    ButtonColor,
+                    actions[i].action);
+
+                // Label piccola in alto, come nella striscia pennelli a sinistra.
+                MakeLabel(b.transform, actions[i].label,
+                    new Vector3(0f, bSize * 0.30f, -0.004f),
+                    new Vector2(bSize * 0.92f, bSize * 0.30f),
+                    ActionLabelFont,
+                    TextAlignmentOptions.Center);
+
+                // Icona sotto la label.
+                MakeIconImage(b.transform, actions[i].name,
+                    new Vector3(0f, -bSize * 0.13f, -0.004f),
+                    bSize * 0.58f);
             }
+        }
+
+        Renderer MakeToolButton(string label, string iconName, Cell cell, System.Action action)
+        {
+            var b = MakeRoundedButton(panel.transform, label, cell.Center, cell.Size,
+                Mathf.Min(0.008f, cell.Size.y * 0.3f), ButtonColor, action);
+
+            // Scritta piccola in alto a sinistra
+            MakeLabel(
+                b.transform,
+                label,
+                new Vector3(-cell.Size.x * 0.05f, cell.Size.y * 0.30f, -0.004f),
+                new Vector2(cell.Size.x * 0.70f, cell.Size.y * 0.25f),
+                ToolSmallLabelFont,
+                TextAlignmentOptions.TopLeft
+            );
+
+            // Icona grande al centro
+            MakeIconImage(
+                b.transform,
+                iconName,
+                new Vector3(0f, -cell.Size.y * 0.08f, -0.004f),
+                Mathf.Min(cell.Size.x, cell.Size.y) * 0.62f
+            );
+
+            return b.GetComponent<Renderer>();
         }
 
         // Pulsante con icona a sinistra + testo a destra, senza sovrapposizioni
