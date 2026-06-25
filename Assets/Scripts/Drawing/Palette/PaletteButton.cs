@@ -15,6 +15,13 @@ namespace MixedRealityProject.Drawing
         public Action OnPressed;
 
         /// <summary>
+        /// Se valorizzata, il pulsante è un TOGGLE: dopo la pressione restituisce il nuovo
+        /// stato on/off, così il feedback sceglie il suono giusto (ascendente/discendente).
+        /// Null = pulsante "azione" (suono di click). Impostata da PaletteController.
+        /// </summary>
+        public Func<bool> ToggleState;
+
+        /// <summary>
         /// Registro di tutti i pulsanti attivi: lo snap-to-button del PaletteRay lo
         /// scorre invece di fare un Physics.OverlapSphere da 2 m su tutta la scena
         /// ogni frame. I pulsanti sono pochi e noti, non serve la fisica.
@@ -25,7 +32,7 @@ namespace MixedRealityProject.Drawing
         public Collider Col { get; private set; }
 
         const float DebounceSeconds = 0.3f;
-        const float HapticDuration = 0.05f;
+        const float PressAnimSeconds = 0.05f; // durata dell'affondo "click" del pulsante
 
         float lastPress = -1f;
         Vector3 baseScale;
@@ -52,6 +59,8 @@ namespace MixedRealityProject.Drawing
                 return;
             hovered = on;
             transform.localScale = on ? baseScale * 1.10f : baseScale;
+            if (on)
+                UiFeedback.Instance?.Hover(); // tick leggero all'ingresso dell'hover
         }
 
         void OnTriggerEnter(Collider other)
@@ -67,16 +76,19 @@ namespace MixedRealityProject.Drawing
             if (Time.time - lastPress < DebounceSeconds)
                 return;
             lastPress = Time.time;
-            OnPressed?.Invoke();
-            StartCoroutine(PressFeedback());
+            OnPressed?.Invoke(); // per i toggle questo aggiorna già lo stato letto sotto
+            if (ToggleState != null)
+                UiFeedback.Instance?.Toggle(ToggleState());
+            else
+                UiFeedback.Instance?.Press();
+            StartCoroutine(PressAnim());
         }
 
-        System.Collections.IEnumerator PressFeedback()
+        // Affondo visivo del pulsante alla pressione (il suono/vibrazione li dà UiFeedback).
+        System.Collections.IEnumerator PressAnim()
         {
             transform.localScale = baseScale * 0.85f;
-            OVRInput.SetControllerVibration(0.5f, 0.5f, StrokeSettings.BrushHand);
-            yield return new WaitForSeconds(HapticDuration);
-            OVRInput.SetControllerVibration(0f, 0f, StrokeSettings.BrushHand);
+            yield return new WaitForSeconds(PressAnimSeconds);
             transform.localScale = hovered ? baseScale * 1.10f : baseScale;
         }
     }

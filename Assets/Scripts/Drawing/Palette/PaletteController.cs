@@ -92,6 +92,7 @@ namespace MixedRealityProject.Drawing
         {
             transform.localPosition = localOffset;
             transform.localRotation = Quaternion.Euler(localEuler);
+            gameObject.AddComponent<UiFeedback>(); // suono + vibrazione centralizzati per la palette
             BuildPanel();
             // Tutti i controlli appena creati vanno sul layer della palette (per il ray).
             SetLayerRecursively(gameObject, PaletteLayer);
@@ -127,13 +128,16 @@ namespace MixedRealityProject.Drawing
             if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, StrokeSettings.PaletteHand))
             {
                 isOpen = !isOpen;
-                StartCoroutine(HapticPulse(0.04f));
+                UiFeedback.Instance?.PanelToggle(isOpen);
             }
 #if UNITY_EDITOR
             // Nel simulatore non c'è il trigger del visore: il tasto P apre/chiude.
             if (UnityEngine.InputSystem.Keyboard.current != null
                 && UnityEngine.InputSystem.Keyboard.current.pKey.wasPressedThisFrame)
+            {
                 isOpen = !isOpen;
+                UiFeedback.Instance?.PanelToggle(isOpen);
+            }
 #endif
 
             AnimateVisibility();
@@ -155,13 +159,6 @@ namespace MixedRealityProject.Drawing
             bool active = visibility > 0.001f;
             if (panel.activeSelf != active)
                 panel.SetActive(active);
-        }
-
-        IEnumerator HapticPulse(float duration)
-        {
-            OVRInput.SetControllerVibration(0.4f, 0.5f, StrokeSettings.PaletteHand);
-            yield return new WaitForSeconds(duration);
-            OVRInput.SetControllerVibration(0f, 0f, StrokeSettings.PaletteHand);
         }
 
         void LateUpdate()
@@ -464,6 +461,8 @@ namespace MixedRealityProject.Drawing
         {
             var b = MakeRoundedButton(panel.transform, label + "Toggle", cell.Center, cell.Size,
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
+            // È un toggle: il feedback userà il suono on/off in base al nuovo stato.
+            b.GetComponent<PaletteButton>().ToggleState = isOn;
             MakeLabel(b.transform, label, new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center);
             var r = b.GetComponent<Renderer>();
             // Aggiorna il colore solo quando lo stato del toggle cambia davvero.
