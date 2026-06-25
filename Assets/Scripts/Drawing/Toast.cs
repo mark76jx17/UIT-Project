@@ -101,6 +101,10 @@ namespace MixedRealityProject.Drawing
             {
                 timer -= Time.deltaTime;
                 SetAlpha(timer >= FadeTime ? 1f : Mathf.Clamp01(timer / FadeTime));
+                // Quando il toast finisce, azzera del tutto l'alpha: senza questo resta
+                // un residuo (~0.04) sul pannello scuro → ombra sempre visibile in scena.
+                if (timer <= 0f)
+                    SetAlpha(0f);
             }
         }
 

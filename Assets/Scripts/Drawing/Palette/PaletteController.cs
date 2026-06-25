@@ -39,6 +39,14 @@ namespace MixedRealityProject.Drawing
         // nell'Inspector, ma funzionale): cambialo se 30 fosse già usato nel progetto.
         public const int PaletteLayer = 30;
 
+        // Quando un sotto-pannello modale è aperto (es. Options), SOLO i controlli sotto
+        // questo nodo sono interagibili: tutto il resto della palette resta visibile ma
+        // "sotto" e non risponde a ray/punta, così non si tocca per sbaglio. PaletteRay e
+        // PaletteButton consultano IsInteractable prima di agire.
+        public static Transform ModalRoot;
+        public static bool IsInteractable(GameObject go)
+            => ModalRoot == null || go.transform.IsChildOf(ModalRoot);
+
         static readonly Color PanelColor = new(0.10f, 0.10f, 0.12f, 0.96f);
         static readonly Color ButtonColor = new(0.22f, 0.22f, 0.27f, 1f);
         static readonly Color AccentColor = new(0.55f, 0.45f, 0.95f, 1f);
@@ -181,6 +189,8 @@ namespace MixedRealityProject.Drawing
                 bool show = optionsOpen && active;
                 if (optionsPanel.activeSelf != show)
                     optionsPanel.SetActive(show);
+                // Modale: mentre è mostrato, il resto della palette non è interagibile.
+                ModalRoot = show ? optionsPanel.transform : null;
             }
         }
 
@@ -250,7 +260,7 @@ namespace MixedRealityProject.Drawing
             panel = new GameObject("Panel");
             panel.transform.SetParent(transform, false);
 
-            var panelSize = new Vector2(0.26f, 0.48f);
+            var panelSize = new Vector2(0.29f, 0.48f);
             const float pad = 0.012f, rowGap = 0.008f, colGap = 0.012f, z = -0.002f;
 
             MakeRounded(panel.transform, "MainPanel", Vector3.zero, panelSize, 0.030f, PanelColor, QueuePanel);
@@ -263,7 +273,7 @@ namespace MixedRealityProject.Drawing
             // ---------- COLOR (ruota · checker · luminosità, allineati; label "Bright" in alto) ----------
             var colorRow = layout.Row(0.12f);
             var wheelCell = colorRow.Left(0.10f);     // ruota a sinistra
-            var brightCol = colorRow.Right(0.055f);   // luminosità a destra
+            var brightCol = colorRow.Right(0.08f);    // luminosità a destra (largo per la label "Brightness")
             var previewCell = colorRow.Fill();        // anteprima/checker al centro
 
             // I 3 elementi condividono ALTEZZA e CENTRO verticale → allineati (top/bottom a
@@ -293,10 +303,16 @@ namespace MixedRealityProject.Drawing
             colorWheel.Build(wheelDiameter, PanelColor, wheelMaxZoom);
             colorWheel.SetProximityTarget(Brush != null ? Brush.Tip : null);
 
-            // Anteprima/checker: stessa altezza e stesso centro della ruota.
+            // Anteprima/checker: stessa altezza della ruota, ma centrata esattamente a
+            // METÀ tra il centro della ruota e il centro dello slider luminosità. La cella
+            // Fill non basta: lo slider è sottile e sta al centro della sua colonna larga,
+            // quindi lo spazio visivo a destra sarebbe maggiore. Uso il punto medio reale.
+            // +verso lo slider (destra), -verso la ruota. REGOLA QUI.
+            const float previewNudge = 0.012f;
+            float previewX = (wheelCell.Center.x + brightCol.Center.x) * 0.5f + previewNudge;
             var previewGO = new GameObject("ColorPreview");
             previewGO.transform.SetParent(panel.transform, false);
-            previewGO.transform.localPosition = new Vector3(previewCell.Center.x, elemY, previewCell.Center.z);
+            previewGO.transform.localPosition = new Vector3(previewX, elemY, previewCell.Center.z);
             previewGO.AddComponent<ColorPreview>().Build(new Vector2(previewCell.Size.x * 0.9f, colH));
 
             // Slider luminosità: stessa altezza e centro; label "Bright" nella fascetta in alto.
@@ -304,7 +320,7 @@ namespace MixedRealityProject.Drawing
             bright.transform.SetParent(panel.transform, false);
             bright.transform.localPosition = new Vector3(brightCol.Center.x, elemY, brightCol.Center.z);
             bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, colH));
-            MakeLabel(panel.transform, "Bright",
+            MakeLabel(panel.transform, "Brightness",
                 new Vector3(brightCol.Center.x, wheelCell.Center.y + wheelCell.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
                 new Vector2(brightCol.Size.x, brightLabelH), SliderLabelFont, TextAlignmentOptions.Center);
             layout.Gap(0.007f);
@@ -385,7 +401,7 @@ namespace MixedRealityProject.Drawing
                 () => ReferenceGrid.Enabled,
                 () => ReferenceGrid.Toggle(Head != null ? Head.transform : transform));
 
-            MakeToggleButton("Snap", toggleCells[2],
+            MakeToggleButton("Line", toggleCells[2],
                 () => StrokeSettings.SnapAxis,
                 () => StrokeSettings.SnapAxis = !StrokeSettings.SnapAxis);
 
@@ -436,23 +452,64 @@ namespace MixedRealityProject.Drawing
         // è il punto d'estensione per le impostazioni future della palette.
         void BuildOptionsPanel()
         {
-            var size = new Vector2(0.20f, 0.13f);
-            optionsPanel = MakeRounded(transform, "OptionsPanel", new Vector3(0f, 0f, -0.02f),
-                size, 0.02f, PanelColor, QueuePanel);
+            var size = new Vector2(0.26f, 0.165f);
+            // Fluttua un po' SOPRA il pannello principale (metà altezza palette ~0.24),
+            // con un piccolo stacco, e leggermente più avanti (Z negativa) così non si
+            // confonde con i controlli sotto.
+            const float paletteHalfH = 0.24f;
+            float y = paletteHalfH + 0.025f + size.y * 0.5f;
+            optionsPanel = MakeRounded(transform, "OptionsPanel", new Vector3(0f, y, -0.02f),
+                size, 0.026f, PanelColor, QueuePanel);
 
+            float top = size.y * 0.5f;
+
+            // Header: titolo a sinistra + linea separatrice accent sotto.
             MakeLabel(optionsPanel.transform, "Options",
-                new Vector3(0f, size.y * 0.5f - 0.022f, -0.004f),
-                new Vector2(size.x, 0.022f), SliderLabelFont, TextAlignmentOptions.Center);
+                new Vector3(-0.006f, top - 0.026f, -0.004f),
+                new Vector2(size.x - 0.06f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
 
-            var toggleCell = new Cell
+            MakeRounded(optionsPanel.transform, "HeaderSep",
+                new Vector3(0f, top - 0.05f, -0.004f),
+                new Vector2(size.x - 0.05f, 0.0035f), 0.0017f, AccentColor, QueueControl);
+
+            // Bottone di chiusura (✕) in alto a destra: serve perché, da modale, il bottone
+            // "Options" nella striscia azioni non è più premibile (è "sotto" il menu).
+            var closeCell = new Cell
             {
-                Center = new Vector3(0f, -0.012f, -0.004f),
-                Size = new Vector2(size.x - 0.03f, 0.045f)
+                Center = new Vector3(size.x * 0.5f - 0.026f, top - 0.026f, -0.004f),
+                Size = new Vector2(0.034f, 0.034f)
             };
-            MakeToggleButton("Left-Handed", toggleCell,
-                () => StrokeSettings.LeftHanded,
-                () => StrokeSettings.LeftHanded = !StrokeSettings.LeftHanded,
-                optionsPanel.transform, optionsSync);
+            var close = MakeRoundedButton(optionsPanel.transform, "OptionsClose",
+                closeCell.Center, closeCell.Size, 0.01f, ButtonColor, CloseOptionsPanel);
+            MakeLabel(close.transform, "X", new Vector3(0f, 0.001f, -0.004f),
+                closeCell.Size, SliderLabelFont, TextAlignmentOptions.Center);
+
+            // Voce: handedness. Un solo bottone che alterna mano dominante; la label mostra
+            // la modalità verso cui si commuterebbe (Left-Handed se ora siamo a destra,
+            // Right-Handed se ora siamo a sinistra) e si illumina (accent) quando mancino.
+            var handCell = new Cell
+            {
+                Center = new Vector3(0f, -0.018f, -0.004f),
+                Size = new Vector2(size.x - 0.05f, 0.05f)
+            };
+            var hand = MakeRoundedButton(optionsPanel.transform, "HandednessToggle",
+                handCell.Center, handCell.Size, Mathf.Min(0.014f, handCell.Size.y * 0.4f),
+                ButtonColor, () => StrokeSettings.LeftHanded = !StrokeSettings.LeftHanded);
+            hand.GetComponent<PaletteButton>().ToggleState = () => StrokeSettings.LeftHanded;
+            var handLabel = MakeLabel(hand.transform, "", new Vector3(0f, 0f, -0.004f),
+                handCell.Size, ToggleFont, TextAlignmentOptions.Center);
+            var handRend = hand.GetComponent<Renderer>();
+            bool handInit = false, handLast = false;
+            optionsSync.Add(() =>
+            {
+                bool on = StrokeSettings.LeftHanded;
+                if (handInit && on == handLast)
+                    return;
+                handInit = true;
+                handLast = on;
+                handLabel.text = on ? "Right-Handed" : "Left-Handed";
+                handRend.material.SetColor(BaseColorId, on ? AccentColor : ButtonColor);
+            });
 
             SetLayerRecursively(optionsPanel, PaletteLayer);
             optionsPanel.SetActive(false);
@@ -462,8 +519,20 @@ namespace MixedRealityProject.Drawing
         {
             optionsOpen = !optionsOpen;
             if (optionsPanel != null)
+            {
                 optionsPanel.SetActive(optionsOpen);
+                ModalRoot = optionsOpen ? optionsPanel.transform : null;
+            }
             UiFeedback.Instance?.PanelToggle(optionsOpen);
+        }
+
+        void CloseOptionsPanel()
+        {
+            optionsOpen = false;
+            if (optionsPanel != null)
+                optionsPanel.SetActive(false);
+            ModalRoot = null;
+            UiFeedback.Instance?.PanelToggle(false);
         }
 
         static void SetLayerRecursively(GameObject go, int layer)
@@ -545,8 +614,8 @@ namespace MixedRealityProject.Drawing
         {
             var actions = new (string name, string label, System.Action action)[]
             {
-                ("redo",  "redo",       StrokeHistory.Redo),
-                ("undo",  "undo",       StrokeHistory.Undo),
+                ("redo",  "undo",       StrokeHistory.Redo),
+                ("undo",  "redo",       StrokeHistory.Undo),
                 ("save",  "save",       DrawingStore.Save),
                 ("load",  "load",       DrawingStore.Load),
                 ("clear", "delete all", DrawingStore.NewScene),
@@ -721,7 +790,8 @@ namespace MixedRealityProject.Drawing
         }
 
         // Etichetta TextMeshPro a dimensione fissa (niente auto-size che gonfia il testo).
-        void MakeLabel(Transform parent, string text, Vector3 localPos, Vector2 box, float fontSize, TextAlignmentOptions align)
+        // Restituisce il TMP così i chiamanti che lo desiderano possono aggiornare il testo.
+        TextMeshPro MakeLabel(Transform parent, string text, Vector3 localPos, Vector2 box, float fontSize, TextAlignmentOptions align)
         {
             var go = new GameObject("Label");
             go.transform.SetParent(parent, false);
@@ -744,6 +814,7 @@ namespace MixedRealityProject.Drawing
                 tmp.font = TMP_Settings.defaultFontAsset;
             if (tmp.fontSharedMaterial != null)
                 tmp.fontMaterial.renderQueue = QueueText;
+            return tmp;
         }
     }
 }

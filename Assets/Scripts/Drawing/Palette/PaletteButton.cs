@@ -67,6 +67,9 @@ namespace MixedRealityProject.Drawing
         {
             if (other.GetComponentInParent<BrushTip>() == null)
                 return;
+            // Se un menu modale (Options) è aperto, i controlli "sotto" non rispondono.
+            if (!PaletteController.IsInteractable(gameObject))
+                return;
             Press();
         }
 

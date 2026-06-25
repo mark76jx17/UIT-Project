@@ -47,25 +47,58 @@ namespace MixedRealityProject.Drawing
 
         // ---------- glifi ----------
 
+        // Matita diagonale (punta in basso-sinistra) con corpo netto, ghiera/gommino
+        // separati da una fascetta e un piccolo tratto disegnato sotto la punta.
         static void Pencil()
         {
-            Seg(new(-0.50f, -0.50f), new(0.34f, 0.34f), 0.18f); // corpo
-            Tri(new(0.20f, 0.56f), new(0.56f, 0.20f), new(0.74f, 0.74f)); // punta
+            Vector2 u = new Vector2(1f, 1f).normalized;  // asse del corpo (verso alto-destra)
+            Vector2 n = new(-u.y, u.x);                  // normale (larghezza)
+            const float hw = 0.135f;                     // mezza larghezza del corpo
+            Vector2 P(float t, float h) => u * t + n * h;
+
+            const float tip = -0.64f, cone = -0.32f, ferrule = 0.30f, top = 0.52f, gap = 0.035f;
+
+            // corpo in legno (quad netto)
+            Tri(P(cone, hw), P(cone, -hw), P(ferrule - gap, -hw));
+            Tri(P(cone, hw), P(ferrule - gap, -hw), P(ferrule - gap, hw));
+            // punta affilata
+            Tri(P(cone, hw), P(cone, -hw), P(tip, 0f));
+            // ghiera + gommino (oltre la fascetta)
+            Tri(P(ferrule + gap, hw), P(ferrule + gap, -hw), P(top, -hw));
+            Tri(P(ferrule + gap, hw), P(top, -hw), P(top, hw));
+
+            // tratto appena disegnato sotto la punta: rende chiara l'azione "Draw"
+            Seg(new(-0.52f, -0.62f), new(0.20f, -0.62f), 0.05f);
         }
 
+        // Goccia di colore: disco + triangolo con base sul diametro → teardrop liscia.
         static void Droplet()
         {
-            Disc(new(0f, -0.18f), 0.24f);
-            Tri(new(-0.17f, -0.04f), new(0.17f, -0.04f), new(0f, 0.40f));
+            Disc(new(0f, -0.12f), 0.30f);
+            Tri(new(-0.30f, -0.12f), new(0.30f, -0.12f), new(0f, 0.56f));
         }
 
+        // Gomma inclinata in due parti (corpo + gomma, separate da una fascetta) con
+        // alcune briciole sotto, per leggere l'azione "Erase".
         static void Eraser()
         {
-            // blocco inclinato (parallelogramma) via due triangoli
-            Vector2 a = new(-0.55f, -0.05f), b = new(0.20f, -0.50f);
-            Vector2 c = new(0.55f, 0.12f), d = new(-0.20f, 0.57f);
-            Tri(a, b, c);
-            Tri(a, c, d);
+            Vector2 u = new Vector2(0.95f, -0.31f).normalized; // asse lungo, leggermente inclinato
+            Vector2 n = new(-u.y, u.x);                        // normale (altezza)
+            Vector2 ctr = new(-0.02f, 0.16f);
+            const float hl = 0.54f, hh = 0.23f, sx = 0.10f, gap = 0.035f;
+            Vector2 P(float t, float h) => ctr + u * t + n * h;
+
+            // corpo (porzione lunga)
+            Tri(P(-hl, hh), P(-hl, -hh), P(sx - gap, -hh));
+            Tri(P(-hl, hh), P(sx - gap, -hh), P(sx - gap, hh));
+            // gomma (porzione corta oltre la fascetta)
+            Tri(P(sx + gap, hh), P(sx + gap, -hh), P(hl, -hh));
+            Tri(P(sx + gap, hh), P(hl, -hh), P(hl, hh));
+
+            // briciole
+            Disc(new(-0.34f, -0.42f), 0.052f);
+            Disc(new(-0.05f, -0.52f), 0.046f);
+            Disc(new(0.24f, -0.46f), 0.050f);
         }
 
         static void Arc(bool redo)

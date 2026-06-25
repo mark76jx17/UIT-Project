@@ -177,6 +177,8 @@ namespace MixedRealityProject.Drawing
             {
                 var btn = buttons[i];
                 if (btn == null || btn.Col == null) continue;
+                // Niente snap verso i controlli "sotto" un menu modale aperto.
+                if (!PaletteController.IsInteractable(btn.gameObject)) continue;
                 var to = btn.Col.bounds.center - origin;
                 if (to.sqrMagnitude > maxDistance * maxDistance) continue;
                 float angle = Vector3.Angle(dir, to);
@@ -196,7 +198,9 @@ namespace MixedRealityProject.Drawing
         }
 
         static bool IsPaletteControl(GameObject go) =>
-            go.GetComponent<PaletteButton>() != null
-            || go.GetComponent<IPaletteControl>() != null;
+            (go.GetComponent<PaletteButton>() != null
+             || go.GetComponent<IPaletteControl>() != null)
+            // Con un menu modale (Options) aperto, i controlli "sotto" non sono bersagli.
+            && PaletteController.IsInteractable(go);
     }
 }
