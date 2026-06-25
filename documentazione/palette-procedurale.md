@@ -465,3 +465,19 @@ Compila pulito; il fix riguarda l'alpha del passthrough → **non visibile in ed
 verificare sul device. (Stessa causa potenziale su `AlphaSlider`/`ColorPreview`, che però sono
 trasparenti **di proposito** su scacchiera: lì il buco mostrerebbe passthrough invece della
 scacchiera — se in VR si nota, applicare lo stesso `PreserveDestAlpha`.)
+
+### Step 13 — allineamento riga colore (ruota · checker · luminosità) (2026-06-25)
+Feedback utente: i tre elementi della riga colore erano **asimmetrici**. Cause: il checker
+(`ColorPreview`) era alto `0.80` della riga (più basso della ruota) e lo slider luminosità
+era **spinto in giù** di ~0.012 per far posto alla label **"Bright"** sopra (che inoltre
+sporgeva). Fix in `BuildPanel` (riga colore): si riserva in alto una **fascetta**
+(`brightLabelH = 0.018`) per la label, e i tre elementi condividono **altezza comune**
+(`colH = rowH − brightLabelH`) e **stesso centro verticale** (`elemY`, abbassato di
+`brightLabelH/2`): scendendo tutti e tre della stessa quantità restano **allineati tra loro**
+(top/bottom a livello). La label **"Bright" è mantenuta** nella fascetta in alto, centrata
+sopra lo slider. Lo zoom della ruota usa la nuova posizione (`wheelPos`) per `edgeDist`.
+Verificato in anteprima editor (`Tools/Palette Preview` + screenshot): tre elementi allineati
++ label "Bright" presente. Compila pulito.
+
+> Aggiorna lo stato di §4.1: ruota, checker e slider luminosità sono allineati (stessa altezza
+> e centro); la label "Bright" è in una fascetta in alto sopra lo slider.

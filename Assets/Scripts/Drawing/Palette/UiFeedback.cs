@@ -43,7 +43,7 @@ namespace MixedRealityProject.Drawing
             click      = Blip("uiClick",      900f,  700f, 0.05f, 0.50f);
             toggleOn   = Blip("uiToggleOn",   620f, 1040f, 0.09f, 0.45f);
             toggleOff  = Blip("uiToggleOff", 1040f,  620f, 0.09f, 0.45f);
-            hover      = Blip("uiHover",     1600f, 1600f, 0.02f, 0.18f);
+            hover      = Blip("uiHover",     1600f, 1600f, 0.02f, 0.08f);
             panelOpen  = Sweep("uiPanelOpen", 420f,  940f, 0.14f, 0.40f);
             panelClose = Sweep("uiPanelClose", 940f, 420f, 0.14f, 0.40f);
         }
@@ -74,7 +74,7 @@ namespace MixedRealityProject.Drawing
         public void Hover()
         {
             source.PlayOneShot(hover);
-            Vibrate(ref brush, StrokeSettings.BrushHand, 0.02f, freq: 0.3f, amp: 0.20f);
+            Vibrate(ref brush, StrokeSettings.BrushHand, 0.015f, freq: 0.3f, amp: 0.10f);
         }
 
         /// <summary>Apertura/chiusura del pannello (mano palette).</summary>

@@ -15,8 +15,17 @@ namespace MixedRealityProject.Drawing
     {
         [SerializeField] OVRInput.Controller controller = OVRInput.Controller.RTouch;
         [SerializeField] float grabRadius = 0.04f;
+        [Tooltip("Raggio della sonda sulla punta del pennello: più piccolo dell'area del " +
+                 "controller, per selezioni precise puntando un tratto sottile.")]
+        [SerializeField] float tipProbeRadius = 0.018f;
         [SerializeField] float pressThreshold = 0.55f;
         [SerializeField] float releaseThreshold = 0.35f;
+
+        // Punta del pennello (impostata dal DrawingRig solo sulla mano del pennello):
+        // sonda di selezione aggiuntiva, più precisa dell'area del controller. Null
+        // sull'altra mano → solo l'area del controller, come prima.
+        Transform tipProbe;
+        public Transform TipProbe { set => tipProbe = value; }
 
         Transform holding;
         Transform hovered;
@@ -97,18 +106,28 @@ namespace MixedRealityProject.Drawing
 
         void UpdateHover()
         {
+            // Prima la punta del pennello (sonda piccola, precisa): così puoi selezionare
+            // un tratto sottile puntandolo. Se la punta non aggancia nulla (o non c'è, es.
+            // mano palette), ripiega sull'area larga del controller, come da sempre.
             Transform found = null;
-            int count = Physics.OverlapSphereNonAlloc(transform.position, grabRadius,
+            if (tipProbe != null)
+                found = ProbeAt(tipProbe.position, tipProbeRadius);
+            if (found == null)
+                found = ProbeAt(transform.position, grabRadius);
+            SetHover(found);
+        }
+
+        Transform ProbeAt(Vector3 position, float radius)
+        {
+            int count = Physics.OverlapSphereNonAlloc(position, radius,
                 overlapBuffer, Physics.AllLayers, QueryTriggerInteraction.Collide);
             for (int i = 0; i < count; i++)
             {
                 var t = GrabRoot(overlapBuffer[i]);
-                if (t == null)
-                    continue;
-                found = t;
-                break;
+                if (t != null)
+                    return t;
             }
-            SetHover(found);
+            return null;
         }
 
         /// <summary>Radice afferrabile di un collider: un oggetto disegnato o il piano

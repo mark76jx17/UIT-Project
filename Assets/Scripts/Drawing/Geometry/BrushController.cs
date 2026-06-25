@@ -18,7 +18,7 @@ namespace MixedRealityProject.Drawing
     {
         [Header("Punta del pennello (offset in avanti dal controller)")]
         [Tooltip("Posizione della punta rispetto al controller: in avanti (Z) e poco sotto (Y), come la punta di una penna fuori dalla mano.")]
-        [SerializeField] Vector3 tipOffset = new(0f, -0.01f, 0.08f);
+        [SerializeField] Vector3 tipOffset = new(-0.012f, -0.01f, 0.08f);
 
         [Header("Poke palette (zona di interazione)")]
         [Tooltip("Lunghezza della zona di poke a forma di segmento, dalla pallina indietro verso " +

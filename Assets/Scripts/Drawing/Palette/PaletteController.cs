@@ -234,48 +234,52 @@ namespace MixedRealityProject.Drawing
 
             var layout = new PaletteLayout(panelSize, pad, rowGap, colGap, z);
 
-            // ---------- COLOR (ruota a sx, anteprima tratto al centro, luminosità a dx) ----------
+            // ---------- COLOR (ruota · checker · luminosità, allineati; label "Bright" in alto) ----------
             var colorRow = layout.Row(0.12f);
             var wheelCell = colorRow.Left(0.10f);     // ruota a sinistra
-            var brightCol = colorRow.Right(0.055f);   // luminosità (con label sopra) a destra
-            var previewCell = colorRow.Fill();        // anteprima al centro (zona liberata)
+            var brightCol = colorRow.Right(0.055f);   // luminosità a destra
+            var previewCell = colorRow.Fill();        // anteprima/checker al centro
+
+            // I 3 elementi condividono ALTEZZA e CENTRO verticale → allineati (top/bottom a
+            // livello). In alto resta una fascetta per la label "Bright": tutti e tre
+            // scendono della stessa quantità, quindi restano allineati tra loro.
+            const float brightLabelH = 0.018f;
+            float colH = wheelCell.Size.y - brightLabelH;            // altezza comune
+            float elemY = wheelCell.Center.y - brightLabelH * 0.5f;  // centro verticale comune
 
             // Ruota colori
             var wheel = new GameObject("ColorWheel");
             wheel.transform.SetParent(panel.transform, false);
-            wheel.transform.localPosition = wheelCell.Center;
+            var wheelPos = new Vector3(wheelCell.Center.x, elemY, wheelCell.Center.z);
+            wheel.transform.localPosition = wheelPos;
             var colorWheel = wheel.AddComponent<ColorWheel>();
-            float wheelDiameter = Mathf.Min(wheelCell.Size.x, wheelCell.Size.y);
+            float wheelDiameter = Mathf.Min(wheelCell.Size.x, colH);
             // Lo zoom di prossimità si ferma quando il bordo della ruota raggiunge il
             // bordo del pannello: limite = distanza dal centro ruota al bordo più vicino
             // del pannello, divisa per il raggio base.
             float halfX = panelSize.x * 0.5f, halfY = panelSize.y * 0.5f;
             float edgeDist = Mathf.Min(
-                Mathf.Min(wheelCell.Center.x + halfX, halfX - wheelCell.Center.x),
-                Mathf.Min(wheelCell.Center.y + halfY, halfY - wheelCell.Center.y));
+                Mathf.Min(wheelPos.x + halfX, halfX - wheelPos.x),
+                Mathf.Min(wheelPos.y + halfY, halfY - wheelPos.y));
             // Margine (< 1) per fermarsi un filo prima del bordo del pannello. REGOLA QUI.
             const float wheelZoomMargin = 0.92f;
             float wheelMaxZoom = edgeDist / (wheelDiameter * 0.5f) * wheelZoomMargin;
             colorWheel.Build(wheelDiameter, PanelColor, wheelMaxZoom);
             colorWheel.SetProximityTarget(Brush != null ? Brush.Tip : null);
 
-            // Anteprima del tratto: rettangolo che assume colore + opacità + dimensione correnti.
+            // Anteprima/checker: stessa altezza e stesso centro della ruota.
             var previewGO = new GameObject("ColorPreview");
             previewGO.transform.SetParent(panel.transform, false);
-            previewGO.transform.localPosition = previewCell.Center;
-            previewGO.AddComponent<ColorPreview>().Build(
-                new Vector2(previewCell.Size.x * 0.92f, previewCell.Size.y * 0.80f));
+            previewGO.transform.localPosition = new Vector3(previewCell.Center.x, elemY, previewCell.Center.z);
+            previewGO.AddComponent<ColorPreview>().Build(new Vector2(previewCell.Size.x * 0.9f, colH));
 
-            // Slider luminosità a destra, con label "Bright" sopra.
-            const float brightLabelH = 0.020f;
-            float barH = brightCol.Size.y - brightLabelH - 0.004f;
+            // Slider luminosità: stessa altezza e centro; label "Bright" nella fascetta in alto.
             var bright = new GameObject("BrightnessSlider");
             bright.transform.SetParent(panel.transform, false);
-            bright.transform.localPosition = new Vector3(
-                brightCol.Center.x, brightCol.Center.y - brightLabelH * 0.5f - 0.002f, brightCol.Center.z);
-            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, barH));
+            bright.transform.localPosition = new Vector3(brightCol.Center.x, elemY, brightCol.Center.z);
+            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, colH));
             MakeLabel(panel.transform, "Bright",
-                new Vector3(brightCol.Center.x, brightCol.Center.y + brightCol.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
+                new Vector3(brightCol.Center.x, wheelCell.Center.y + wheelCell.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
                 new Vector2(brightCol.Size.x, brightLabelH), SliderLabelFont, TextAlignmentOptions.Center);
             layout.Gap(0.007f);
 
@@ -379,9 +383,23 @@ namespace MixedRealityProject.Drawing
         // (lato della mano che disegna). Ogni bottone mostra un'anteprima del tratto.
         void BuildBrushStrip(Vector2 panelSize)
         {
-            const float bSize = 0.048f, bGap = 0.012f;
+            // Bottone più grande per ospitare label (sopra) + icona del tratto (sotto).
+            const float bSize = 0.058f, bGap = 0.012f;
+            const float BrushLabelFont = 0.10f; // piccola, non invadente
             int n = BrushOrder.Length;
-            float contentH = n * bSize + (n - 1) * bGap;
+
+            // TEMP: pennelli disattivati su richiesta (vedi modifiche-temporanee.md). Restano
+            // nelle array brushButtons/brushPreviewMats (indici per tipo intatti → SyncSelection
+            // ok) ma sono nascosti e NON occupano uno slot nella striscia: i visibili si
+            // ricompattano. Per riabilitare un pennello, toglilo da questo set.
+            var disabled = new System.Collections.Generic.HashSet<BrushType> { BrushType.Glow };
+
+            int visibleCount = 0;
+            for (int i = 0; i < n; i++)
+                if (!disabled.Contains(BrushOrder[i]))
+                    visibleCount++;
+
+            float contentH = visibleCount * bSize + (visibleCount - 1) * bGap;
             var stripSize = new Vector2(bSize + 0.014f, contentH + 0.014f);
             float stripX = -panelSize.x * 0.5f - 0.012f - stripSize.x * 0.5f;
 
@@ -391,17 +409,38 @@ namespace MixedRealityProject.Drawing
             brushButtons = new Renderer[n];
             brushPreviewMats = new Material[n];
             float y0 = (contentH - bSize) * 0.5f;
+            int slot = 0; // posizione visibile (avanza solo per i pennelli attivi)
             for (int i = 0; i < n; i++)
             {
                 var type = BrushOrder[i];
-                float y = y0 - i * (bSize + bGap);
+                bool off = disabled.Contains(type);
+                // Ordine naturale: dall'alto verso il basso stroke, ribbon, dashed.
+                float y = y0 - slot * (bSize + bGap);
                 var b = MakeRoundedButton(strip.transform, type.ToString(), new Vector3(0f, y, -0.004f),
-                    new Vector2(bSize, bSize), 0.011f, ButtonColor, () => StrokeSettings.Type = type);
+                    new Vector2(bSize, bSize), 0.013f, ButtonColor, () => StrokeSettings.Type = type);
+                // Label in alto, dentro il bottone.
+                MakeLabel(b.transform, BrushLabel(type), new Vector3(0f, bSize * 0.30f, -0.004f),
+                    new Vector2(bSize * 0.92f, bSize * 0.30f), BrushLabelFont, TextAlignmentOptions.Center);
+                // Icona (anteprima del tratto) sotto la label.
                 brushPreviewMats[i] = MakeTexQuad(b.transform, BrushPreview.Get(type),
-                    new Vector3(0f, 0f, -0.004f), new Vector2(bSize * 0.74f, bSize * 0.44f));
+                    new Vector3(0f, -bSize * 0.13f, -0.004f), new Vector2(bSize * 0.78f, bSize * 0.40f));
                 brushButtons[i] = b.GetComponent<Renderer>();
+                if (off)
+                    b.SetActive(false); // nascosto e non consuma uno slot visibile
+                else
+                    slot++;
             }
         }
+
+        // Etichetta leggibile del tipo di pennello (Round → "stroke").
+        static string BrushLabel(BrushType type) => type switch
+        {
+            BrushType.Round => "stroke",
+            BrushType.Ribbon => "ribbon",
+            BrushType.Dashed => "dashed",
+            BrushType.Glow => "glow",
+            _ => type.ToString().ToLower()
+        };
 
         // Striscia verticale Undo/Redo/Save/Load, ancorata a destra del pannello.
         // Solo icone (niente testo), per accorciare il pannello principale.

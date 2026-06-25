@@ -42,7 +42,9 @@ namespace MixedRealityProject.Drawing
             if (brushAnchor != null)
                 brushGO.transform.SetParent(brushAnchor, false);
             var brush = brushGO.AddComponent<BrushController>();
-            brushGO.AddComponent<GrabController>().Controller = StrokeSettings.BrushHand;
+            var brushGrab = brushGO.AddComponent<GrabController>();
+            brushGrab.Controller = StrokeSettings.BrushHand;
+            brushGrab.TipProbe = brush.Tip; // selezione precisa anche con la punta del pennello
             brushGO.AddComponent<PaletteRay>().Brush = brush; // interazione a distanza con la palette
 
             if (paletteAnchor != null && paletteAnchor != eyeAnchor)

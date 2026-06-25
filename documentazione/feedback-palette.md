@@ -63,7 +63,7 @@ on/off dopo la pressione). Lo imposta `PaletteController.MakeToggleButton`.
 | Pressione azione   | Blip 900→700 Hz, 0.05s, 0.50     | Brush, 0.05s, 0.5, 0.50           |
 | Toggle ON          | Blip 620→1040 Hz, 0.09s, 0.45    | Brush, 0.05s, 0.5, 0.55           |
 | Toggle OFF         | Blip 1040→620 Hz, 0.09s, 0.45    | Brush, 0.05s, 0.5, 0.55           |
-| Hover              | Blip 1600 Hz, 0.02s, 0.18        | Brush, 0.02s, 0.3, 0.20           |
+| Hover              | Blip 1600 Hz, 0.02s, 0.08        | Brush, 0.015s, 0.3, 0.10          |
 | Apertura pannello  | Sweep 420→940 Hz, 0.14s, 0.40    | Palette, 0.05s, 0.4, 0.50         |
 | Chiusura pannello  | Sweep 940→420 Hz, 0.14s, 0.40    | Palette, 0.05s, 0.4, 0.50         |
 
