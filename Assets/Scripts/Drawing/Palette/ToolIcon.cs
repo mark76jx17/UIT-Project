@@ -32,6 +32,9 @@ namespace MixedRealityProject.Drawing
                 case "load": SaveLoad(down: false); break;
                 case "clear": Trash(); break;
                 case "options": Ellipsis(); break;
+                case "bolt": Bolt(); break;
+                case "hand-right": Hand(mirror: false); break;
+                case "hand-left": Hand(mirror: true); break;
                 default: Disc(Vector2.zero, 0.4f); break;
             }
 
@@ -128,6 +131,40 @@ namespace MixedRealityProject.Drawing
             Disc(new(-0.34f, 0f), 0.13f);
             Disc(new(0f, 0f), 0.13f);
             Disc(new(0.34f, 0f), 0.13f);
+        }
+
+        // Saetta (menu "View Shortcuts"): poligono pieno a zig-zag, stesso stile SDF
+        // degli altri glifi. Specifica di progetto (nessuna convenzione di icona da seguire).
+        static void Bolt()
+        {
+            // 6 vertici del fulmine (cima → giù a sinistra → gradino → punta in basso →
+            // su a destra → gradino), divisi in due quad pieni che condividono il lato P3-P6.
+            Vector2 p1 = new(0.20f, 0.90f);   // cima
+            Vector2 p2 = new(-0.40f, -0.05f); // metà sinistra
+            Vector2 p3 = new(-0.05f, -0.05f); // gradino interno
+            Vector2 p4 = new(-0.20f, -0.90f); // punta in basso
+            Vector2 p5 = new(0.40f, 0.10f);   // lato destro
+            Vector2 p6 = new(0.05f, 0.10f);   // gradino interno
+            Tri(p1, p2, p3); Tri(p1, p3, p6); // metà superiore
+            Tri(p3, p4, p5); Tri(p3, p5, p6); // metà inferiore
+        }
+
+        // Mano stilizzata (palmo + 4 dita + pollice) per il bottone handedness: pollice a
+        // sinistra = mano destra; mirror=true specchia su X → mano sinistra. Specifica di
+        // progetto. Disegnata con le primitive SDF esistenti (Box/Seg), coerente con gli altri.
+        static void Hand(bool mirror)
+        {
+            Vector2 P(float x, float y) => M(mirror, new Vector2(x, y));
+            const float fw = 0.075f; // mezza larghezza dita/pollice
+            // palmo
+            Box(P(0f, -0.18f), new(0.34f, 0.30f));
+            // quattro dita verticali (medio più lungo), che sovrappongono il bordo del palmo
+            Seg(P(-0.24f, 0.05f), P(-0.24f, 0.60f), fw); // indice
+            Seg(P(-0.08f, 0.05f), P(-0.08f, 0.72f), fw); // medio
+            Seg(P(0.08f, 0.05f), P(0.08f, 0.64f), fw);   // anulare
+            Seg(P(0.24f, 0.05f), P(0.24f, 0.48f), fw);   // mignolo
+            // pollice inclinato sul lato sinistro (destra di chi guarda dopo il mirror)
+            Seg(P(-0.30f, -0.12f), P(-0.56f, 0.22f), 0.09f);
         }
 
         static void Trash()

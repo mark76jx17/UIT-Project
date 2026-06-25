@@ -73,6 +73,12 @@ namespace MixedRealityProject.Drawing
             palette.Brush = brush;
             palette.HandAnchor = paletteAnchor;
 
+            // Scorciatoie da controller: attivano le funzioni della palette senza aprirla
+            // (girano solo con runtime XR attivo; in desktop comanda DesktopBrushSimulator).
+            var shortcuts = brushGO.AddComponent<ControllerShortcuts>();
+            shortcuts.Palette = palette;
+            shortcuts.Head = eyeAnchor;
+
             // Toggle "Left-Handed Mode" dal menu Options: riapplica le mani a runtime.
             StrokeSettings.LeftHandedChanged += ApplyHandedness;
 
