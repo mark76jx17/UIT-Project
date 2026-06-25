@@ -3,17 +3,18 @@ using UnityEngine;
 namespace MixedRealityProject.Drawing
 {
     /// <summary>
-    /// Slider verticale di luminosità (la V di HSV) accanto alla ruota dei
-    /// colori: gradiente nero→bianco generato in codice, pomello che segue il
-    /// valore corrente. Si usa toccandolo (visore) o trascinando (simulatore).
+    /// Slider verticale di luminosità accanto alla ruota dei colori. Convenzione a 3
+    /// fermate: in basso nero, al centro il colore pieno scelto sulla ruota, in alto
+    /// bianco. Gradiente generato in codice e rigenerato quando cambia la tinta. Si usa
+    /// toccandolo (visore) o trascinando (simulatore).
     /// </summary>
     public class BrightnessSlider : MonoBehaviour, IPaletteControl
     {
-        static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-
         float height;
         Transform knob;
         Material material;
+        Texture2D texture;
+        float builtHue = -1f, builtSat = -1f;
 
         public void Build(Vector2 size)
         {
@@ -23,8 +24,8 @@ namespace MixedRealityProject.Drawing
             filter.mesh = RoundedMesh.TexturedQuad(size.x, size.y);
             var renderer = gameObject.AddComponent<MeshRenderer>();
             material = BrushMaterials.CreateUnlit(Color.white, opaque: true);
-            material.SetTexture("_BaseMap", GenerateTexture(64));
             renderer.material = material;
+            Regenerate(); // crea il gradiente nero-colore-bianco e lo assegna
 
             var collider = gameObject.AddComponent<BoxCollider>();
             collider.isTrigger = true;
@@ -50,10 +51,10 @@ namespace MixedRealityProject.Drawing
         void Update()
         {
             knob.localPosition = new Vector3(0f, (StrokeSettings.Val - 0.5f) * height, -0.003f);
-            // Tinge il gradiente: nero→colore pieno alla tinta/saturazione correnti,
-            // così la barra mostra "l'intensità di QUESTO colore".
-            if (material != null)
-                material.SetColor(BaseColorId, Color.HSVToRGB(StrokeSettings.Hue, StrokeSettings.Sat, 1f));
+            // La tinta puo cambiare dalla ruota: rigenero il gradiente solo se serve.
+            if (!Mathf.Approximately(builtHue, StrokeSettings.Hue) ||
+                !Mathf.Approximately(builtSat, StrokeSettings.Sat))
+                Regenerate();
         }
 
         void OnTriggerStay(Collider other)
@@ -62,17 +63,27 @@ namespace MixedRealityProject.Drawing
                 PressAt(other.transform.position);
         }
 
-        static Texture2D GenerateTexture(int size)
+        void Regenerate()
         {
-            var texture = new Texture2D(2, size, TextureFormat.RGBA32, false)
-            {
-                wrapMode = TextureWrapMode.Clamp,
-            };
+            builtHue = StrokeSettings.Hue;
+            builtSat = StrokeSettings.Sat;
+            texture = GenerateTexture(64, StrokeSettings.PureColor, texture);
+            material.SetTexture("_BaseMap", texture);
+        }
+
+        // Gradiente verticale: nero (basso) - colore pieno (centro) - bianco (alto).
+        static Texture2D GenerateTexture(int size, Color pure, Texture2D reuse)
+        {
+            var texture = reuse != null ? reuse
+                : new Texture2D(2, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
             var pixels = new Color[2 * size];
             for (int y = 0; y < size; y++)
             {
-                float v = (float)y / (size - 1);
-                var color = new Color(v, v, v, 1f);
+                float t = (float)y / (size - 1); // 0 basso, 1 alto
+                Color color = t <= 0.5f
+                    ? Color.Lerp(Color.black, pure, t * 2f)
+                    : Color.Lerp(pure, Color.white, (t - 0.5f) * 2f);
+                color.a = 1f;
                 pixels[y * 2] = color;
                 pixels[y * 2 + 1] = color;
             }

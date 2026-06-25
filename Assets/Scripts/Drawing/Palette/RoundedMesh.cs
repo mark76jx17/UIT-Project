@@ -68,6 +68,44 @@ namespace MixedRealityProject.Drawing
             return mesh;
         }
 
+        /// <summary>
+        /// Disco con UV (0..1) rivolto verso -Z, per la ruota dei colori. A differenza
+        /// di <see cref="TexturedQuad"/> non ha angoli: ingrandendosi (zoom di prossimità)
+        /// non c'è alcun angolo del quadrato che possa "sbucare" oltre il bordo arrotondato
+        /// del pannello. Il centro mappa l'UV (0.5,0.5), il bordo il cerchio inscritto della
+        /// texture (la stessa texture quadrata della ruota va bene: si usa solo il disco).
+        /// </summary>
+        public static Mesh TexturedDisc(float diameter, int segments = 64)
+        {
+            float r = diameter * 0.5f;
+            var vertices = new List<Vector3> { Vector3.zero };
+            var uvs = new List<Vector2> { new(0.5f, 0.5f) };
+            for (int i = 0; i <= segments; i++)
+            {
+                float a = (float)i / segments * Mathf.PI * 2f;
+                float cos = Mathf.Cos(a), sin = Mathf.Sin(a);
+                vertices.Add(new Vector3(cos * r, sin * r, 0f));
+                uvs.Add(new Vector2(0.5f + 0.5f * cos, 0.5f + 0.5f * sin));
+            }
+            var triangles = new List<int>();
+            for (int i = 1; i <= segments; i++)
+            {
+                triangles.Add(0);
+                triangles.Add(i + 1);
+                triangles.Add(i);
+            }
+            var normals = new Vector3[vertices.Count];
+            for (int i = 0; i < normals.Length; i++)
+                normals[i] = Vector3.back;
+
+            var mesh = new Mesh { name = "TexturedDisc" };
+            mesh.SetVertices(vertices);
+            mesh.SetUVs(0, uvs);
+            mesh.SetNormals(new List<Vector3>(normals));
+            mesh.SetTriangles(triangles, 0);
+            return mesh;
+        }
+
         static void AddArc(List<Vector3> contour, Vector2 center, float radius,
             float startDegrees, int segments)
         {

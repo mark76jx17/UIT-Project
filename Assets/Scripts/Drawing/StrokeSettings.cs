@@ -32,7 +32,6 @@ namespace MixedRealityProject.Drawing
     /// </summary>
     public static class StrokeSettings
     {
-        public static Color BaseColor = Color.white;
         public static float Alpha = 1f;
 
         /// <summary>Strumento corrente: penna, riempimento o gomma.</summary>
@@ -67,23 +66,43 @@ namespace MixedRealityProject.Drawing
             Mathf.Lerp(MinFixedRadius, MaxFixedRadius, Size01);
 
 
-        // Stato HSV per la ruota dei colori e lo slider di luminosità.
+        // Stato della ruota dei colori. La "luminosità" (Val) è uno slider a 3 fermate:
+        // 0 = nero, 0.5 = colore pieno (quello scelto sulla ruota), 1 = bianco.
         public static float Hue;
         public static float Sat;
-        public static float Val = 1f;
+        public static float Val = 0.5f; // 0 nero · 0.5 colore pieno · 1 bianco
+
+        /// <summary>Colore "puro" scelto dalla ruota (tinta + saturazione a piena luminosità).</summary>
+        public static Color PureColor => Color.HSVToRGB(Hue, Sat, 1f);
 
         public static void SetHSV(float hue, float sat, float val)
         {
             Hue = hue;
             Sat = sat;
             Val = val;
-            BaseColor = Color.HSVToRGB(hue, sat, val);
         }
 
         public static void SetColor(Color color)
         {
-            Color.RGBToHSV(color, out var h, out var s, out var v);
-            SetHSV(h, s, v);
+            Color.RGBToHSV(color, out var h, out var s, out _);
+            Hue = h;
+            Sat = s;
+            Val = 0.5f; // i recenti sono colori pieni → luminosità neutra
+        }
+
+        /// <summary>
+        /// Colore base = colore puro modulato dalla luminosità: nero (Val 0) ↔ colore
+        /// pieno (Val 0.5) ↔ bianco (Val 1).
+        /// </summary>
+        public static Color BaseColor
+        {
+            get
+            {
+                var pure = PureColor;
+                return Val <= 0.5f
+                    ? Color.Lerp(Color.black, pure, Val * 2f)
+                    : Color.Lerp(pure, Color.white, (Val - 0.5f) * 2f);
+            }
         }
 
         public static Color Color

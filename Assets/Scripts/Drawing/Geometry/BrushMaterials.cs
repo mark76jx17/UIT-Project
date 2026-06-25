@@ -123,6 +123,19 @@ namespace MixedRealityProject.Drawing
             material.SetColor("_BaseColor", c);
         }
 
+        /// <summary>
+        /// Per icone/anteprime trasparenti disegnate SOPRA un controllo opaco: il colore si
+        /// fonde normalmente, ma l'alpha del framebuffer viene PRESERVATO (blend alpha Zero/One)
+        /// invece di essere sovrascritto. Senza questo, le zone trasparenti dell'icona scrivono
+        /// alpha 0 e "bucano" l'occlusione del passthrough Quest (see-through) anche se il
+        /// bottone sotto è opaco.
+        /// </summary>
+        public static void PreserveDestAlpha(Material material)
+        {
+            material.SetInt("_SrcBlendAlpha", (int)BlendMode.Zero);
+            material.SetInt("_DstBlendAlpha", (int)BlendMode.One);
+        }
+
         static void MakeTransparent(Material material)
         {
             material.SetFloat("_Surface", 1f); // 1 = Transparent

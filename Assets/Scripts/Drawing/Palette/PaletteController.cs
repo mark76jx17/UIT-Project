@@ -56,6 +56,7 @@ namespace MixedRealityProject.Drawing
         // Dimensioni font (point-size TMP in unità locali metriche: ~0.003 m per unità).
         const float ButtonFont = 0.20f;   // Draw/Fill/Erase (riga larga)
         const float ToggleFont = 0.24f;
+        const float SliderLabelFont = 0.13f; // label degli slider: piccola ma leggibile
 
         // Icone nei bottoni testuali (Draw/Fill/Erase, Undo/Redo/Save/Load): disattivate
         // su richiesta — solo label testuale. Il codice icone (ToolIcon/MakeIconImage)
@@ -226,33 +227,59 @@ namespace MixedRealityProject.Drawing
             panel = new GameObject("Panel");
             panel.transform.SetParent(transform, false);
 
-            var panelSize = new Vector2(0.26f, 0.43f);
+            var panelSize = new Vector2(0.26f, 0.46f);
             const float pad = 0.012f, rowGap = 0.008f, colGap = 0.012f, z = -0.002f;
 
-            MakeRounded(panel.transform, "MainPanel", Vector3.zero, panelSize, 0.020f, PanelColor, QueuePanel);
+            MakeRounded(panel.transform, "MainPanel", Vector3.zero, panelSize, 0.030f, PanelColor, QueuePanel);
 
             BuildBrushStrip(panelSize);
             BuildActionStrip(panelSize);
 
             var layout = new PaletteLayout(panelSize, pad, rowGap, colGap, z);
 
-            // ---------- COLOR (ruota circolare + slider luminosità) ----------
-            var colorRow = layout.Row(0.10f);
-            var wheelCell = colorRow.Left(0.10f);
-            colorRow.Left(0.008f);                 // spazietto tra ruota e barra
-            var brightCell = colorRow.Left(0.016f);
+            // ---------- COLOR (ruota a sx, anteprima tratto al centro, luminosità a dx) ----------
+            var colorRow = layout.Row(0.12f);
+            var wheelCell = colorRow.Left(0.10f);     // ruota a sinistra
+            var brightCol = colorRow.Right(0.055f);   // luminosità (con label sopra) a destra
+            var previewCell = colorRow.Fill();        // anteprima al centro (zona liberata)
 
+            // Ruota colori
             var wheel = new GameObject("ColorWheel");
             wheel.transform.SetParent(panel.transform, false);
             wheel.transform.localPosition = wheelCell.Center;
             var colorWheel = wheel.AddComponent<ColorWheel>();
-            colorWheel.Build(Mathf.Min(wheelCell.Size.x, wheelCell.Size.y));
+            float wheelDiameter = Mathf.Min(wheelCell.Size.x, wheelCell.Size.y);
+            // Lo zoom di prossimità si ferma quando il bordo della ruota raggiunge il
+            // bordo del pannello: limite = distanza dal centro ruota al bordo più vicino
+            // del pannello, divisa per il raggio base.
+            float halfX = panelSize.x * 0.5f, halfY = panelSize.y * 0.5f;
+            float edgeDist = Mathf.Min(
+                Mathf.Min(wheelCell.Center.x + halfX, halfX - wheelCell.Center.x),
+                Mathf.Min(wheelCell.Center.y + halfY, halfY - wheelCell.Center.y));
+            // Margine (< 1) per fermarsi un filo prima del bordo del pannello. REGOLA QUI.
+            const float wheelZoomMargin = 0.92f;
+            float wheelMaxZoom = edgeDist / (wheelDiameter * 0.5f) * wheelZoomMargin;
+            colorWheel.Build(wheelDiameter, PanelColor, wheelMaxZoom);
             colorWheel.SetProximityTarget(Brush != null ? Brush.Tip : null);
 
+            // Anteprima del tratto: rettangolo che assume colore + opacità + dimensione correnti.
+            var previewGO = new GameObject("ColorPreview");
+            previewGO.transform.SetParent(panel.transform, false);
+            previewGO.transform.localPosition = previewCell.Center;
+            previewGO.AddComponent<ColorPreview>().Build(
+                new Vector2(previewCell.Size.x * 0.92f, previewCell.Size.y * 0.80f));
+
+            // Slider luminosità a destra, con label "Bright" sopra.
+            const float brightLabelH = 0.020f;
+            float barH = brightCol.Size.y - brightLabelH - 0.004f;
             var bright = new GameObject("BrightnessSlider");
             bright.transform.SetParent(panel.transform, false);
-            bright.transform.localPosition = brightCell.Center;
-            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, brightCell.Size.y * 0.95f));
+            bright.transform.localPosition = new Vector3(
+                brightCol.Center.x, brightCol.Center.y - brightLabelH * 0.5f - 0.002f, brightCol.Center.z);
+            bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, barH));
+            MakeLabel(panel.transform, "Bright",
+                new Vector3(brightCol.Center.x, brightCol.Center.y + brightCol.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
+                new Vector2(brightCol.Size.x, brightLabelH), SliderLabelFont, TextAlignmentOptions.Center);
             layout.Gap(0.007f);
 
             var recentRow = layout.Row(0.030f);
@@ -272,7 +299,12 @@ namespace MixedRealityProject.Drawing
             }
             layout.Gap(0.007f);
 
-            var alphaCell = layout.Row(0.024f).Fill();
+            var alphaRow = layout.Row(0.024f);
+            var alphaLabel = alphaRow.Left(0.055f);
+            var alphaCell = alphaRow.Fill();
+            MakeLabel(panel.transform, "Opacity",
+                new Vector3(alphaLabel.Center.x, alphaLabel.Center.y, -0.006f),
+                alphaLabel.Size, SliderLabelFont, TextAlignmentOptions.Left);
             var alpha = new GameObject("AlphaSlider");
             alpha.transform.SetParent(panel.transform, false);
             alpha.transform.localPosition = alphaCell.Center;
@@ -294,7 +326,12 @@ namespace MixedRealityProject.Drawing
                 () => StrokeSettings.SizeMode = StrokeSettings.SizeMode == SizeMode.PressureBrush
                     ? SizeMode.FixedPen : SizeMode.PressureBrush);
 
-            var sizeCell = layout.Row(0.024f).Fill();
+            var sizeRow = layout.Row(0.024f);
+            var sizeLabel = sizeRow.Left(0.055f);
+            var sizeCell = sizeRow.Fill();
+            MakeLabel(panel.transform, "Size",
+                new Vector3(sizeLabel.Center.x, sizeLabel.Center.y, -0.006f),
+                sizeLabel.Size, SliderLabelFont, TextAlignmentOptions.Left);
             var size = new GameObject("SizeSlider");
             size.transform.SetParent(panel.transform, false);
             size.transform.localPosition = sizeCell.Center;
@@ -454,6 +491,9 @@ namespace MixedRealityProject.Drawing
             var mat = BrushMaterials.CreateUnlit(Color.white);
             mat.SetTexture("_BaseMap", tex);
             mat.renderQueue = QueueIcon;
+            // Preserva l'alpha opaco del bottone sotto: niente see-through sul passthrough
+            // dove l'icona/anteprima è trasparente.
+            BrushMaterials.PreserveDestAlpha(mat);
             go.AddComponent<MeshRenderer>().material = mat;
             return mat;
         }

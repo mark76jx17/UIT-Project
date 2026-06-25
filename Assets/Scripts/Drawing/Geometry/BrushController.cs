@@ -20,6 +20,12 @@ namespace MixedRealityProject.Drawing
         [Tooltip("Posizione della punta rispetto al controller: in avanti (Z) e poco sotto (Y), come la punta di una penna fuori dalla mano.")]
         [SerializeField] Vector3 tipOffset = new(0f, -0.01f, 0.08f);
 
+        [Header("Poke palette (zona di interazione)")]
+        [Tooltip("Lunghezza della zona di poke a forma di segmento, dalla pallina indietro verso " +
+                 "il controller. Così oltrepassando la pallina l'interazione non si perde. " +
+                 "0 = solo la pallina (vecchio comportamento).")]
+        [SerializeField] float pokeReach = 0.07f;
+
         [Header("Trigger (isteresi)")]
         [SerializeField] float pressThreshold = 0.55f;
         [SerializeField] float releaseThreshold = 0.35f;
@@ -131,9 +137,20 @@ namespace MixedRealityProject.Drawing
             tip.transform.SetParent(transform, false);
             tip.transform.localPosition = tipOffset; // punta in avanti, fuori dal controller
             tip.AddComponent<BrushTip>();
-            var collider = tip.AddComponent<SphereCollider>();
+            // Zona di poke a forma di segmento (capsula invisibile lungo l'asse Z, cioè
+            // avanti dal controller): va dalla pallina indietro verso il controller. Se
+            // l'utente spinge il controller oltre la pallina, parte del segmento resta
+            // dentro il controllo e l'interazione non si perde (prima era solo la pallina,
+            // un singolo punto). Slider e ruota leggono comunque X/Y della pallina, quindi
+            // il valore scelto resta corretto: la profondità Z non lo influenza.
+            var collider = tip.AddComponent<CapsuleCollider>();
             collider.isTrigger = true;
+            collider.direction = 2; // asse Z locale
             collider.radius = 0.012f;
+            float pokeFront = collider.radius;   // poco davanti alla pallina (come la vecchia sfera)
+            float pokeBack = -pokeReach;          // indietro verso il controller
+            collider.height = pokeFront - pokeBack;
+            collider.center = new Vector3(0f, 0f, (pokeFront + pokeBack) * 0.5f);
             var body = tip.AddComponent<Rigidbody>();
             body.isKinematic = true;
             Tip = tip.transform;

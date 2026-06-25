@@ -233,10 +233,16 @@ disco resta pulita).
 
 Obiettivo (richiesta utente): togliere la trasparenza che fa vedere il passthrough
 attraverso slider e bordo della ruota, usare più spazio per il picker, slider orizzontali
-auto-esplicativi al posto delle label lunghe. Diviso in 4 sotto-step (4a–4d), ognuno
-compilato e verificato in anteprima (`Tools/Palette Preview`) via screenshot MCP.
+auto-esplicativi al posto delle label lunghe. Pensato in 4 sotto-step (4a–4d).
 
-### 4a — Materiali opachi (fix trasparenza)
+> ⚠️ **Stato effettivo (riallineamento doc 2026-06-24).** Solo **4a, 4c e 4d** sono
+> realmente nel codice committato (`0c9a7ec`). Il cuore dello **Step 4b — lo swap del
+> picker da `ColorWheel`/`BrightnessSlider` a `ColorSquare`/`HueBar` — NON è stato
+> applicato a `PaletteController`**: il pannello attivo costruisce ancora ruota colori +
+> slider luminosità (vedi *§4.1 Stato corrente*). Questa sezione era stata scritta come se
+> 4b fosse completo; il testo qui sotto è ora corretto per descrivere ciò che gira davvero.
+
+### 4a — Materiali opachi (fix trasparenza) ✅ applicato
 `BrushMaterials.CreateUnlit(color, opaque=false)`: nuova variante **opaca** (`MakeOpaque`:
 `_Surface=0`, `ZWrite=1`, blend One/Zero, queue Geometry). `MakeRounded` ora crea sfondi
 opachi di default (`opaque=true`) → pannello, striscia, bottoni, separatori, swatch non si
@@ -244,14 +250,19 @@ vedono più "attraverso" sul passthrough e il sorting è risolto dal **depth** i
 render queue trasparenti. `EmptySwatch` da bianco α0.15 a grigio scuro opaco (slot vuoto
 leggibile anche senza alpha).
 
-### 4b — ColorSquare + HueBar (via la ruota)
-Nuovi componenti `ColorSquare` (quadrato Saturazione×Valore grande, texture rigenerata al
-cambio tinta) e `HueBar` (barra tinta orizzontale), entrambi opachi, col tocco del `BrushTip`
-(`OnTriggerStay`) o mouse/raggio (`PressAt`). **Rimossi** `ColorWheel` e lo slider
-`BrightnessSlider` (la luminosità è l'asse Y del quadrato). Pannello alzato da `0.56` a
-`0.64` m per fare spazio al picker.
+### 4b — ColorSquare + HueBar ❌ NON applicato (codice orfano)
+Erano stati **creati** i componenti `ColorSquare` (quadrato Saturazione×Valore, texture
+rigenerata al cambio tinta) e `HueBar` (barra tinta orizzontale), entrambi opachi, col tocco
+del `BrushTip` (`OnTriggerStay`) o mouse/raggio (`PressAt`). **Ma `PaletteController.BuildPanel()`
+non li istanzia**: continua a usare `ColorWheel` + `BrightnessSlider`. Di conseguenza:
+- `Assets/Scripts/Drawing/Palette/ColorSquare.cs` e `HueBar.cs` sono **codice morto** (referenziati
+  solo in via difensiva da `PaletteRay`/`DesktopBrushSimulator`, rami che non scattano mai perché
+  i componenti non esistono in scena).
+- `ColorWheel.cs` e `BrightnessSlider.cs` **NON** sono stati eliminati (la doc precedente diceva
+  di sì): sono i picker realmente attivi.
+- Il pannello **non** è stato alzato a `0.64` m: resta `0.26 × 0.43`.
 
-### 4c — Slider orizzontali auto-esplicativi
+### 4c — Slider orizzontali auto-esplicativi ✅ applicato
 - `AlphaSlider`: rampa del colore corrente (trasparente→pieno) sopra una **scacchiera opaca**
   di sfondo → la trasparenza si legge come scacchiera, niente più see-through sul passthrough.
 - `SizeSlider`: riscritto come **cuneo** (sottile→spesso) tinto col colore corrente → mostra
@@ -259,13 +270,198 @@ cambio tinta) e `HueBar` (barra tinta orizzontale), entrambi opachi, col tocco d
 - Rimosse le label testuali "Transparency", "Size", "Recent"; swatch recenti distribuiti su
   5 celle piene (`Split(5)`). Font `SectionFont` non più usato → rimosso.
 
-### 4d — Rifinitura e pulizia
-- `PaletteRay` (raggio) e `DesktopBrushSimulator` (mouse simulatore) riallineati da
-  `ColorWheel`/`BrightnessSlider` a `ColorSquare`/`HueBar`, così il nuovo picker risponde
-  anche a distanza e col mouse, non solo al tocco diretto.
-- Eliminati i file ora morti `ColorWheel.cs` e `BrightnessSlider.cs`; rimossi `SetQueue` e
-  `SectionFont` inutilizzati.
+### 4d — Rifinitura e pulizia ✅ parziale
+- `PaletteRay` (raggio) e `DesktopBrushSimulator` (mouse simulatore) gestiscono **sia** il
+  picker attivo (`ColorWheel`/`BrightnessSlider`) **sia** quello orfano (`ColorSquare`/`HueBar`):
+  i rami per i nuovi componenti sono presenti ma inerti finché 4b non viene applicato.
+- `SetQueue` e `SectionFont` inutilizzati: **rimossi** ✅.
+- Eliminazione di `ColorWheel.cs`/`BrightnessSlider.cs`: **non fatta** (sono ancora i picker attivi).
 
-**Verificato in anteprima editor** (screenshot): pannello opaco, picker S×V + hue, slider a
-scacchiera e a cuneo, layout completo senza overflow. **Da verificare su device/simulatore**:
-assenza di see-through sul passthrough e interazione (tocco/mouse/raggio) con picker e slider.
+### 4.1 Stato corrente della palette (verificato sul codice, 2026-06-24)
+Il pannello realmente costruito da `PaletteController.BuildPanel()`:
+- **Pannello principale** `0.26 × 0.43` m, opaco (`PanelColor`), angoli arrotondati.
+- **Riga colore**: `ColorWheel` (ruota HSV, Ø ~0.10) + `BrightnessSlider` verticale a destra,
+  con label **"Bright"** a fianco della barra.
+- **Recenti**: 5 swatch su `Split(5)` (persistono in `PlayerPrefs`).
+- **`AlphaSlider`** orizzontale (rampa su scacchiera opaca) con label **"Opacity"** a sinistra.
+- Separatore → **toggle `Pressure`** + **`SizeSlider`** (cuneo, label **"Size"** a sinistra) → separatore.
+- **Strumenti** Draw / Fill / Erase (`Split(3)`, solo testo: `ShowButtonIcons = false`).
+- **Toggle `Mirror`**.
+- **Striscia pennelli** (`BuildBrushStrip`) a sinistra: 4 tipi con anteprima del tratto.
+- **Striscia azioni** (`BuildActionStrip`) a destra: Undo / Redo / Save / Load (solo icone).
+- Apertura/chiusura animata col trigger della mano-palette; materiali tutti opachi.
+
+### 4.2 Lavoro residuo (da decidere col prossimo step)
+Lo Step 4b è una scelta aperta, **non** una regressione:
+1. **Completare 4b** — cablare `ColorSquare`+`HueBar` in `BuildPanel`, alzare il pannello,
+   poi eliminare `ColorWheel.cs`/`BrightnessSlider.cs`; **oppure**
+2. **Restare sulla ruota** — eliminare i file orfani `ColorSquare.cs`/`HueBar.cs` e i rami
+   inerti in `PaletteRay`/`DesktopBrushSimulator`.
+
+In entrambi i casi sparisce la duplicazione dei due picker. Finché non si decide, la palette
+funziona con ruota + slider luminosità.
+
+### Step 5 — label degli slider (2026-06-24)
+Richiesta utente: rendere comprensibili i tre slider (luminosità / spessore / trasparenza)
+con etichette **piccole ma leggibili** che non ostacolino l'uso. Il pannello è verticalmente
+pieno (la riga `Mirror` arriva al bordo inferiore), quindi le label sono state messe **a fianco**
+degli slider, dentro le righe esistenti, senza rubare spazio né coprire la zona di tocco:
+- **"Opacity"** e **"Size"** a sinistra dei rispettivi slider orizzontali (lo slider si accorcia
+  di ~0.055 m, resta ampiamente usabile; `AlphaRow`/`SizeRow` con `Left(0.055)` + `Fill()`).
+- **"Bright"** a destra della barra verticale di luminosità (spazio prima vuoto nella riga colore).
+- Nuovo font `SliderLabelFont = 0.13` (contro `ButtonFont 0.20`), testo bianco, allineato a sinistra.
+
+Testo in inglese per coerenza con Draw/Fill/Erase/Pressure/Mirror (cambiabile in italiano
+banalmente). Compila pulito; **verificato in anteprima editor** (`Tools/Palette Preview` +
+screenshot): le tre label sono presenti e leggibili, gli slider restano liberi. **Da verificare
+su device** la leggibilità della dimensione font.
+
+### Step 6 — ruota colori: zoom e sfondo opaco (2026-06-24)
+Due problemi sulla `ColorWheel` (feedback utente):
+1. **Zoom di prossimità troppo ampio** — avvicinando il controller la ruota si ingrandiva fino
+   a `ZoomMax = 1.9` e sbordava sulla barra di luminosità, coprendo i colori. Prima ridotto a
+   `1.35`, poi (feedback utente) reso **geometrico**: lo zoom massimo non è più una costante ma
+   è **calcolato in `BuildPanel`** come `distanza dal centro ruota al bordo più vicino del
+   pannello / raggio base`. Così la ruota smette di ingrandirsi **esattamente quando l'angolo del
+   suo quadrato raggiunge l'angolo del pannello**. Con il layout attuale (ruota a `0.062` m dai
+   bordi sinistro/superiore, raggio `0.05`) il limite vale **≈1.24**, passato a
+   `ColorWheel.Build(diameter, background, maxZoom)`; `ZoomMax` costante rimosso. Il valore resta
+   corretto anche se cambiano dimensioni del pannello o posizione della ruota.
+2. **"Quadrato" trasparente attorno alla ruota** — la ruota usava `CreateUnlit(Color.white)`
+   **trasparente**; la texture del disco ha alpha 0 negli angoli del quad → in editor gli angoli
+   mostravano lo skybox (sembravano un quadrato chiaro), in passthrough mostravano il mondo reale.
+   Ora la ruota è **opaca** (`opaque: true`) e `GenerateTexture(size, background)` dipinge gli
+   angoli del **colore del pannello** (`PanelColor`, passato da `BuildPanel`): il bordo del disco
+   è anti-aliasato fondendolo con lo sfondo invece che con la trasparenza, `alpha = 1` ovunque.
+   Risultato: nessun quadrato, niente see-through sul passthrough, disco che "galleggia" sul pannello.
+   (Lo `BrightnessSlider` era già `opaque: true`, nessun problema analogo.)
+
+Compila pulito; **verificato in anteprima editor**: il quadrato attorno alla ruota è sparito.
+**Da verificare su device**: entità dello zoom in interazione reale e assenza di see-through.
+
+### Step 7 — rifinitura angoli pannello + margine zoom (2026-06-24)
+Feedback utente dopo prova:
+- **Angoli del pannello più smussati**: raggio del `MainPanel` da `0.020` a **`0.030`** in
+  `BuildPanel` (gli altri controlli/strisce invariati).
+- **Zoom massimo un filo più basso**: aggiunto un margine `const float wheelZoomMargin = 0.92f`
+  (commento `// REGOLA QUI`) al limite geometrico → `wheelMaxZoom = edgeDist / raggio * 0.92`
+  (≈1.24 → ≈1.14), così la ruota si ferma poco prima di toccare l'angolo del pannello.
+
+Compila pulito; angoli più morbidi verificati in anteprima editor.
+
+### Step 8 — ruota su disco invece che quadrato (2026-06-24)
+Feedback utente: zoomando, **l'angolo del quadrato della ruota "sbucava" oltre il bordo
+arrotondato del pannello** (dente scuro brutto). Causa: la ruota era disegnata su un quad
+quadrato (`TexturedQuad`); anche con gli angoli color pannello, a zoom ~1.14 l'angolo finiva
+~0.005 m fuori dal raccordo del pannello. Limitare lo zoom per evitarlo lo avrebbe ridotto a
+~1.06 (quasi nullo).
+
+Fix alla radice: nuova mesh **`RoundedMesh.TexturedDisc(diameter)`** (ventaglio circolare con
+UV, centro→(0.5,0.5), bordo→cerchio inscritto della texture). `ColorWheel.Build` la usa al
+posto di `TexturedQuad`: **niente angoli → niente da sbucare**, e lo zoom attuale (≈1.14)
+resta perché il cerchio entra interamente nel pannello arrotondato (verificato in anteprima
+scalando la ruota a 1.14: disco tutto dentro, angolo del pannello intatto). `GenerateTexture`
+invariata (il bordo del disco sfuma sul colore del pannello). Il `BoxCollider` resta quadrato
+(area di tocco), ininfluente sul visivo.
+
+### Step 9 — poke a segmento invece che a punto (2026-06-24)
+Richiesta utente: con il poke l'utente interagisce tramite la **pallina** (`BrushTip`) davanti al
+controller; se spinge il controller **oltre** la pallina, questa esce dal controllo (sottile in
+profondità) e l'interazione si perde → frustrazione. Voluto: una zona di interazione **a forma di
+segmento (invisibile)** tra la pallina e il controller.
+
+Fix in `BrushController.Awake`: il collider del `BrushTip` passa da **`SphereCollider`** (raggio
+0.012, un punto) a **`CapsuleCollider`** lungo l'asse Z locale (avanti dal controller), che va
+dalla pallina **indietro verso il controller** per `pokeReach` metri (nuovo campo, default
+**0.07**; `0` = vecchio comportamento a punto). Così, oltrepassando la pallina, parte della
+capsula resta dentro il controllo e `OnTriggerEnter`/`OnTriggerStay` continuano a scattare.
+
+Note:
+- Slider e ruota calcolano il valore da **X/Y** della pallina (`PressAt(Tip.position)`): la
+  profondità Z non li influenza, quindi il valore scelto resta corretto anche oltrepassando.
+- La pallina **visibile** (`BrushCursor`) e `Tip.position` (usata per disegno/erase/fill e per lo
+  zoom di prossimità) **non cambiano**: cambia solo la forma del collider invisibile di poke.
+- Compila pulito. **Da verificare in Play/device**: che oltrepassando la pallina i controlli
+  rispondano ancora e che `pokeReach` (0.07) sia una lunghezza comoda.
+
+### Step 10 — anteprima del tratto + riorganizzazione riga colore (2026-06-24)
+Richiesta utente: spostare lo slider luminosità più a destra con la label **sopra**, estendere
+un po' la palette, e nella zona liberata mettere un **rettangolo di anteprima** che assuma
+colore/dimensione/opacità del colore scelto, per capire con cosa si disegna.
+
+- **Pannello più alto**: `panelSize.y` da `0.43` a `0.46`; riga colore da `0.10` a `0.12`.
+- **Riga colore riorganizzata**: ruota a sinistra (`Left(0.10)`), colonna luminosità a destra
+  (`Right(0.055)`) con la barra in basso e la label **"Bright" sopra** (centrata), anteprima al
+  centro nella zona liberata (`Fill()`).
+- **Nuovo componente `ColorPreview`** (`Assets/Scripts/Drawing/Palette/ColorPreview.cs`): una
+  **scacchiera opaca** con sopra un **rettangolo arrotondato trasparente** che assume in tempo
+  reale `StrokeSettings.Color` (colore + alpha) e **scala con `Size01`** (min↔max). Così mostra
+  insieme colore, trasparenza (letta sulla scacchiera) e dimensione del pennello. Lo stato è
+  applicato sia in `Update` (live) sia in `Build` (così è corretto anche nell'anteprima editor,
+  dove `Update` non gira).
+
+Compila pulito; layout verificato in anteprima editor (swatch bianco di default su scacchiera,
+luminosità a destra con label sopra). **Da verificare in Play/device**: che l'anteprima segua
+colore/alpha/size in tempo reale e che le proporzioni siano comode.
+
+### Step 11 — luminosità a 3 fermate (nero · colore · bianco) (2026-06-24)
+Richiesta utente: lo slider luminosità deve seguire la convenzione **nero in basso, colore pieno
+al centro, bianco in alto** (prima era nero→colore, senza bianco).
+
+Modello colore (`StrokeSettings`) rivisto:
+- `Val` ora è la **luminosità a 3 fermate** in [0,1]: `0` nero, `0.5` colore pieno, `1` bianco
+  (default `0.5`). Non è più la V di HSV.
+- `BaseColor` non è più un campo ma una **proprietà calcolata**: `Val ≤ 0.5` → `lerp(nero, puro, Val·2)`,
+  `Val > 0.5` → `lerp(puro, bianco, (Val−0.5)·2)`, dove `PureColor = HSVToRGB(Hue, Sat, 1)` (nuova
+  proprietà = colore scelto sulla ruota a piena luminosità).
+- `SetHSV` non scrive più `BaseColor`; `SetColor` (recenti) imposta tinta+saturazione e `Val=0.5`
+  (luminosità neutra). La ruota continua a passare la `Val` corrente quando si sceglie tinta/sat,
+  quindi cambiare colore non resetta la luminosità.
+
+`BrightnessSlider` riscritto: gradiente **nero→colore→bianco** generato in codice (3 fermate) e
+**rigenerato quando cambia la tinta** (campo `texture` riusato; niente più tint via `_BaseColor`).
+Compila pulito; lo slider renderizza (in editor, colore di default bianco → nero→bianco).
+**Da verificare in Play**: con un colore scelto, basso=nero, centro=colore, alto=bianco; e che
+`AlphaSlider`/`SizeSlider`/`ColorPreview` (che usano `BaseColor`) seguano la luminosità.
+
+### Step 11b — la RUOTA si schiarisce/scurisce con la luminosità (2026-06-24)
+Seconda parte della richiesta. **Chiarimento utente**: per "i colori della palette" si intendeva
+la **ruota dei colori**, non l'interfaccia. Quindi un primo tentativo che tingeva pannello/bottoni
+(helper `Themed`/`ApplyTheme`/`RegisterThemed`) è stato **annullato** (PaletteController tornato
+com'era), e l'effetto è stato spostato sulla ruota.
+
+Implementazione (`ColorWheel`): la texture del disco riflette la **luminosità corrente** (`Val`)
+con la stessa modulazione del colore disegnato — nero (`Val 0`) ↔ colore pieno (`Val 0.5`) ↔
+bianco (`Val 1`). `GenerateTexture(size, background, val, reuse)` applica per pixel
+`lerp(nero, puro, val·2)` / `lerp(puro, bianco, (val−0.5)·2)`; `Regenerate()` rigenera (riusando
+la `Texture2D`) e in `Update` scatta **solo quando `Val` cambia** (cioè muovendo la luminosità o
+scegliendo un recente). Texture ridotta a `160` px per alleggerire la rigenerazione.
+
+Così, abbassando la luminosità la ruota diventa scura (fino a nera), alzandola schiarisce (fino a
+bianca), restando coerente con anteprima e tratto. Compila pulito; ruota a colori pieni a `Val 0.5`
+verificata in anteprima. **Da verificare in Play**: ruota che scurisce/schiarisce con lo slider.
+**Nota**: a `Val 1` (ruota bianca) il pomello bianco si confonde — eventualmente dargli un colore
+di contrasto in uno step successivo se dà fastidio.
+
+### Step 12 — fix see-through icone bottoni laterali (2026-06-24)
+Richiesta utente: togliere il see-through dagli altri bottoni delle strisce laterali (anteprime
+pennello a sinistra, icone Undo/Redo/Save/Load a destra).
+
+**Causa radice.** Lo shader URP/Unlit usa un blend **separato per l'alpha**:
+`Blend [_SrcBlend][_DstBlend], [_SrcBlendAlpha][_DstBlendAlpha]`. Il materiale trasparente di
+default ha alpha blend **`One/Zero`**, quindi un quad icona trasparente **sovrascrive** l'alpha
+del framebuffer con il proprio (≈0 nelle zone trasparenti dell'icona). Su Quest è il canale alpha
+a decidere l'occlusione del passthrough: alpha 0 = buco = see-through, **anche se il bottone sotto
+è opaco** (il suo alpha 1 viene sovrascritto dall'icona).
+
+**Fix.** Nuovo `BrushMaterials.PreserveDestAlpha(material)` che imposta l'alpha blend a
+**`Zero/One`** (`_SrcBlendAlpha`/`_DstBlendAlpha`): l'icona **preserva** l'alpha di destinazione
+(l'1 opaco del bottone) invece di sovrascriverlo; il colore (glifo/anteprima) continua a fondersi
+normalmente. Applicato in `PaletteController.MakeTexQuad`, quindi vale per **tutte** le
+anteprime pennello e le icone azione. Funziona con qualsiasi colore del bottone (anche selezionato
+= accent), senza bisogno di rendere opache le texture.
+
+Compila pulito; il fix riguarda l'alpha del passthrough → **non visibile in editor**, da
+verificare sul device. (Stessa causa potenziale su `AlphaSlider`/`ColorPreview`, che però sono
+trasparenti **di proposito** su scacchiera: lì il buco mostrerebbe passthrough invece della
+scacchiera — se in VR si nota, applicare lo stesso `PreserveDestAlpha`.)
