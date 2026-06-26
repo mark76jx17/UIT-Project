@@ -54,6 +54,12 @@ namespace MixedRealityProject.Drawing
 
             HandlePaletteHand(palette);
             HandleBrushHand(brush);
+
+            // Menu (☰): il tasto menu "classico" esiste fisicamente solo sul Touch
+            // sinistro (Button.Start), quindi è indipendente da quale mano regge la
+            // palette/il pennello. Apre/chiude lo stesso pannello Options del bottone "...".
+            if (OVRInput.GetDown(OVRInput.Button.Start, OVRInput.Controller.LTouch) && Palette != null)
+                Palette.ToggleOptions();
         }
 
         // --- Mano della palette (mano "comandi"): strumenti, tipo pennello, undo/redo, menu, save ---
@@ -69,10 +75,6 @@ namespace MixedRealityProject.Drawing
 
             if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, c))
                 CycleTool();
-
-            // A/X = apri/chiudi il menu Options (stesso pannello del bottone in palette).
-            if (OVRInput.GetDown(OVRInput.Button.One, c) && Palette != null)
-                Palette.ToggleOptions();
 
             // B/Y = salva (DrawingStore.Save mostra già il proprio toast).
             if (OVRInput.GetDown(OVRInput.Button.Two, c))
@@ -161,14 +163,23 @@ namespace MixedRealityProject.Drawing
 
         // ---------------------------------------------------------------------------
         // Unica fonte di verità delle scorciatoie, mostrata dal pannello "View Shortcuts".
-        // Hand = quale controller, Group = raggruppamento per funzione, Action/Input = testo.
+        // Hand = ruolo (mano-palette / mano-pennello); Button = tasto fisico (così il
+        // pannello sa DOVE puntare la linea-guida sul controller); Action = testo breve.
         // ---------------------------------------------------------------------------
+
+        // Tasti fisici a cui può essere agganciata una scorciatoia. Lo stick è un solo
+        // controllo ma con 5 azioni distinte (4 direzioni + click): qui sono voci separate
+        // perché ognuna ha la sua etichetta/posizione nel diagramma.
+        public enum Btn { StickClick, StickUp, StickDown, StickLeft, StickRight, FaceA, FaceB, Menu }
+
         public readonly struct ShortcutBinding
         {
-            public readonly string Hand, Group, Action, Input;
-            public ShortcutBinding(string hand, string group, string action, string input)
+            public readonly string Hand;   // ruolo: PaletteHandName / BrushHandName
+            public readonly Btn Button;
+            public readonly string Action;
+            public ShortcutBinding(string hand, Btn button, string action)
             {
-                Hand = hand; Group = group; Action = action; Input = input;
+                Hand = hand; Button = button; Action = action;
             }
         }
 
@@ -178,22 +189,21 @@ namespace MixedRealityProject.Drawing
         public static readonly ShortcutBinding[] All =
         {
             // Mano della palette
-            new(PaletteHandName, "Tools",      "Cycle tool",  "Stick click"),
-            new(PaletteHandName, "Tools",      "Draw / Fill / Erase", "(cycles)"),
-            new(PaletteHandName, "Brush type", "Cycle type",  "Stick left / right"),
-            new(PaletteHandName, "Brush type", "Stroke / Ribbon / Dashed", "(cycles)"),
-            new(PaletteHandName, "Edit",       "Undo",        "Stick down"),
-            new(PaletteHandName, "Edit",       "Redo",        "Stick up"),
-            new(PaletteHandName, "Menu / File","Options",     "A / X"),
-            new(PaletteHandName, "Menu / File","Save",        "B / Y"),
+            new(PaletteHandName, Btn.StickClick, "Tool"),
+            new(PaletteHandName, Btn.StickLeft,  "Brush −"),
+            new(PaletteHandName, Btn.StickRight, "Brush +"),
+            new(PaletteHandName, Btn.StickUp,    "Redo"),
+            new(PaletteHandName, Btn.StickDown,  "Undo"),
+            new(PaletteHandName, Btn.FaceB,      "Save"),
+            new(PaletteHandName, Btn.Menu,       "Options"), // ☰: fisicamente sul Touch sinistro
 
             // Mano del pennello
-            new(BrushHandName, "Toggles", "Pressure",   "Stick click"),
-            new(BrushHandName, "Toggles", "Grid",       "Stick up"),
-            new(BrushHandName, "Toggles", "Mirror",     "Stick down"),
-            new(BrushHandName, "Toggles", "Snap",       "Stick left"),
-            new(BrushHandName, "File",    "Load",       "Stick right"),
-            new(BrushHandName, "File",    "Delete all", "B / Y  (hold 1.5s)"),
+            new(BrushHandName, Btn.StickClick, "Pressure"),
+            new(BrushHandName, Btn.StickUp,    "Grid"),
+            new(BrushHandName, Btn.StickDown,  "Mirror"),
+            new(BrushHandName, Btn.StickLeft,  "Snap"),
+            new(BrushHandName, Btn.StickRight, "Load"),
+            new(BrushHandName, Btn.FaceB,      "Delete all (hold)"),
         };
     }
 }

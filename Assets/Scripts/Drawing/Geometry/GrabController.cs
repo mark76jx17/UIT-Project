@@ -86,7 +86,7 @@ namespace MixedRealityProject.Drawing
             {
                 // B (mano del pennello) mentre afferri = duplica, stile
                 // Gravity Sketch. Solo su quella mano: sull'altra il tasto
-                // "Two" è già il redo.
+                // "Two" è già Save (vedi ControllerShortcuts).
                 var copy = DrawingStore.Duplicate(holding);
                 if (copy != null)
                 {

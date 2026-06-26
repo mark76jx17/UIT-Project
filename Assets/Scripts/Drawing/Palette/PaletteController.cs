@@ -60,6 +60,10 @@ namespace MixedRealityProject.Drawing
         static readonly Color AccentColor = new(0.55f, 0.45f, 0.95f, 1f);
         static readonly Color TrackColor = new(0.32f, 0.32f, 0.38f, 1f);
         static readonly Color EmptySwatch = new(0.16f, 0.16f, 0.20f, 1f); // slot vuoto: grigio scuro opaco
+
+        // Solo per il tool di anteprima: disegna una griglia normalizzata (-1..1) su ogni
+        // controller per tarare a occhio gli anchor dei tasti. Mai true a runtime.
+        public static bool DebugAnchorGrid;
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
         // Ordini di disegno (tutti i materiali UI sono trasparenti con ZWrite off:
@@ -512,6 +516,7 @@ namespace MixedRealityProject.Drawing
             // da PositionMenus: qui basta crearlo, ci pensa lei ad ancorarlo.
             optionsPanel = MakeRounded(transform, "OptionsPanel", Vector3.zero,
                 size, 0.026f, PanelColor, QueuePanel);
+            optionsPanel.AddComponent<FacePlayer>(); // guarda sempre l'utente quando aperto
 
             float top = size.y * 0.5f;
 
@@ -638,18 +643,31 @@ namespace MixedRealityProject.Drawing
             UiFeedback.Instance?.PanelToggle(false);
         }
 
-        // Pannello "Shortcuts" in sola lettura: due colonne (mano palette / mano pennello),
-        // ognuna raggruppata per funzione, generate da ControllerShortcuts.All (unica fonte).
-        // Solo la X è premibile; le righe sono testo. Vive a parte come optionsPanel.
+#if UNITY_EDITOR
+        // Costruisce SOLO il pannello scorciatoie e lo restituisce attivo: usato dal tool di
+        // anteprima (Tools/Drawing/Preview Shortcuts Panel) per renderizzarlo a PNG senza Play.
+        // In Edit mode Awake/Start non girano, quindi istanziare e chiamare i builder è sicuro.
+        public GameObject EditorBuildShortcutsPanel()
+        {
+            BuildShortcutsPanel();
+            shortcutsPanel.SetActive(true);
+            return shortcutsPanel;
+        }
+#endif
+
+        // Pannello "Shortcuts" in sola lettura: due controller reali (mano palette / mano
+        // pennello) con marker/etichette sui tasti, generati da ControllerShortcuts.All.
+        // Solo la X è premibile; il resto è informativo. Vive a parte come optionsPanel.
         void BuildShortcutsPanel()
         {
             // Pannello ampio: le scorciatoie usano un font pari alle altre label e devono
             // riempire tutta l'area utile, quindi serve spazio in larghezza e altezza. La
             // posizione finale (accanto al bottone ellipsi) è data da PositionMenus.
-            var size = new Vector2(0.70f, 0.44f);
+            var size = new Vector2(0.68f, 0.58f);
             shortcutsSize = size;
             shortcutsPanel = MakeRounded(transform, "ShortcutsPanel", Vector3.zero,
                 size, 0.026f, PanelColor, QueuePanel);
+            shortcutsPanel.AddComponent<FacePlayer>(); // guarda sempre l'utente quando aperto
 
             float top = size.y * 0.5f;
 
@@ -657,8 +675,8 @@ namespace MixedRealityProject.Drawing
             MakeIconImage(shortcutsPanel.transform, "bolt",
                 new Vector3(-size.x * 0.5f + 0.03f, top - 0.03f, -0.005f), 0.028f);
             MakeLabel(shortcutsPanel.transform, "Shortcuts",
-                new Vector3(-size.x * 0.5f + 0.082f, top - 0.03f, -0.004f),
-                new Vector2(size.x - 0.16f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
+                new Vector3(-size.x * 0.5f + 0.26f, top - 0.03f, -0.004f),
+                new Vector2(0.32f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
             MakeRounded(shortcutsPanel.transform, "HeaderSep",
                 new Vector3(0f, top - 0.058f, -0.004f),
                 new Vector2(size.x - 0.05f, 0.0035f), 0.0017f, AccentColor, QueueControl);
@@ -672,50 +690,138 @@ namespace MixedRealityProject.Drawing
             MakeLabel(close.transform, "X", new Vector3(0f, 0.001f, -0.004f),
                 closeCell.Size, SliderLabelFont, TextAlignmentOptions.Center);
 
-            // Corpo a due colonne che riempiono tutta l'area tra header e nota a piè di
-            // pagina (colonne larghe e ben distanziate per ospitare il font ingrandito).
-            float bodyTop = top - 0.078f;
-            float bodyBottom = -top + 0.045f;
-            float boxH = bodyTop - bodyBottom;
-            float centerY = (bodyTop + bodyBottom) * 0.5f;
-            const float colW = 0.32f, colX = 0.175f;
-            BuildShortcutColumn(ControllerShortcuts.PaletteHandName, -colX, centerY, colW, boxH);
-            BuildShortcutColumn(ControllerShortcuts.BrushHandName, colX, centerY, colW, boxH);
+            // UN solo schema (line-art con entrambi i controller, importato e schiarito),
+            // centrato; attorno le etichette delle scorciatoie con linea-guida e anello sul
+            // tasto. Il ruolo (palette/pennello) di ogni controller fisico dipende dalla mano.
+            bool leftIsPalette = StrokeSettings.PaletteHand == OVRInput.Controller.LTouch;
+            string leftRole = leftIsPalette ? ControllerShortcuts.PaletteHandName : ControllerShortcuts.BrushHandName;
+            string rightRole = leftIsPalette ? ControllerShortcuts.BrushHandName : ControllerShortcuts.PaletteHandName;
+
+            BuildSchematicDiagram(leftRole, rightRole, top);
 
             MakeLabel(shortcutsPanel.transform, "Works with the palette closed.",
-                new Vector3(0f, -top + 0.022f, -0.004f),
-                new Vector2(size.x - 0.04f, 0.02f), SliderLabelFont * 0.8f, TextAlignmentOptions.Center);
+                new Vector3(0f, -top + 0.016f, -0.004f),
+                new Vector2(size.x - 0.04f, 0.02f), SliderLabelFont * 0.78f, TextAlignmentOptions.Center);
 
             SetLayerRecursively(shortcutsPanel, PaletteLayer);
             shortcutsPanel.SetActive(false);
         }
 
-        // Una colonna del pannello: header mano + righe (raggruppate) da ControllerShortcuts.All.
-        void BuildShortcutColumn(string hand, float centerX, float centerY, float width, float boxH)
+        // Ancore dei tasti SULLO SCHEMA (frazioni 0..1 dell'immagine: x→destra, y→giù).
+        // Tarate col tool di anteprima (DebugAnchorGrid). Sx: stick/Y/menu; dx: stick/B.
+        static readonly Vector2 SchLStick = new(0.078f, 0.323f);
+        static readonly Vector2 SchY      = new(0.169f, 0.291f);
+        static readonly Vector2 SchLMenu  = new(0.090f, 0.490f);
+        static readonly Vector2 SchRStick = new(0.919f, 0.323f);
+        static readonly Vector2 SchB      = new(0.838f, 0.291f);
+
+        static readonly Color LeaderColor = new(0.62f, 0.56f, 0.92f, 1f); // linea-guida (accent tenue)
+
+        // Cerca l'azione di un tasto per un ruolo nella tabella unica.
+        static string ActionFor(string role, ControllerShortcuts.Btn b)
         {
-            // Font pari alle altre label della UI (slider/opzioni), non più ridotto.
-            const float ShortcutFont = SliderLabelFont;
-            string accent = ColorUtility.ToHtmlStringRGB(AccentColor);
-            var sb = new System.Text.StringBuilder();
-            sb.Append($"<b><color=#{accent}>{hand}</color></b>\n");
-            string lastGroup = null;
-            foreach (var b in ControllerShortcuts.All)
-            {
-                if (b.Hand != hand)
-                    continue;
-                if (b.Group != lastGroup)
+            foreach (var x in ControllerShortcuts.All)
+                if (x.Hand == role && x.Button == b)
+                    return x.Action;
+            return null;
+        }
+
+        // Schema unico (entrambi i controller) centrato + un callout per ogni tasto usato:
+        // blocchi "Thumbstick" ai lati esterni, Y/B sopra i rispettivi controller, Menu sotto.
+        void BuildSchematicDiagram(string leftRole, string rightRole, float top)
+        {
+            const float diagW = 0.34f;
+            float diagH = diagW * 371f / 800f; // proporzioni dello schema
+            const float cy = -0.01f;
+            var tex = Resources.Load<Texture2D>("Controllers/schematic");
+            if (tex != null)
+                MakeTexQuad(shortcutsPanel.transform, tex, new Vector3(0f, cy, -0.004f), new Vector2(diagW, diagH));
+
+            Vector3 P(Vector2 f) => new((f.x - 0.5f) * diagW, cy + (0.5f - f.y) * diagH, -0.0065f);
+
+            if (DebugAnchorGrid)
+                for (float gx = 0f; gx <= 1.001f; gx += 0.1f)
+                for (float gy = 0f; gy <= 1.001f; gy += 0.1f)
                 {
-                    lastGroup = b.Group;
-                    sb.Append($"<b>{b.Group}</b>\n");
+                    bool axis = Mathf.Abs(gx - 0.5f) < 0.01f || Mathf.Abs(gy - 0.5f) < 0.01f;
+                    MakeRounded(shortcutsPanel.transform, "Grid", P(new Vector2(gx, gy)) + new Vector3(0f, 0f, 0.001f),
+                        new Vector2(0.004f, 0.004f), 0.002f, axis ? Color.cyan : new Color(1f, 1f, 1f, 0.5f), QueueIcon);
                 }
-                if (b.Input == "(cycles)")
-                    sb.Append($"<color=#9A9AA8>   {b.Action}</color>\n"); // sotto-riga: ordine del ciclo
-                else
-                    sb.Append($"{b.Action} - {b.Input}\n");
+
+            string acc = ColorUtility.ToHtmlStringRGB(AccentColor);
+            string dim = "#9AA0B5";
+
+            // Etichetta sopra/sotto un tasto, leader verticale + anello.
+            void TagV(string text, Vector3 anchor, float ly)
+            {
+                float endY = ly + (ly > anchor.y ? -0.011f : 0.011f);
+                Leader(anchor, new Vector3(anchor.x, endY, -0.0052f));
+                AnchorDot(anchor, 0.009f);
+                MakeLabel(shortcutsPanel.transform, text, new Vector3(anchor.x, ly, -0.005f),
+                    new Vector2(0.24f, 0.022f), SliderLabelFont * 0.85f, TextAlignmentOptions.Center);
             }
-            MakeLabel(shortcutsPanel.transform, sb.ToString(),
-                new Vector3(centerX, centerY, -0.004f),
-                new Vector2(width, boxH), ShortcutFont, TextAlignmentOptions.TopLeft);
+
+            // Blocchi Thumbstick ai lati esterni.
+            StickBlock(leftRole, acc, dim, P(SchLStick), -diagW * 0.5f - 0.015f, false);
+            StickBlock(rightRole, acc, dim, P(SchRStick), diagW * 0.5f + 0.015f, true);
+
+            float imgTop = cy + diagH * 0.5f, imgBot = cy - diagH * 0.5f;
+
+            // Y (sinistro) = Save, B (destro) = Delete: appena SOPRA lo schema.
+            string yA = ActionFor(leftRole, ControllerShortcuts.Btn.FaceB);
+            if (yA != null) TagV($"<b><color=#{acc}>Y</color></b> {yA}", P(SchY), imgTop + 0.05f);
+            string bA = ActionFor(rightRole, ControllerShortcuts.Btn.FaceB);
+            if (bA != null) TagV($"<b><color=#{acc}>B</color></b> {bA}", P(SchB), imgTop + 0.05f);
+
+            // Menu (Options): tasto fisico del controller sinistro, appena SOTTO lo schema.
+            string mA = ActionFor(ControllerShortcuts.PaletteHandName, ControllerShortcuts.Btn.Menu);
+            if (mA != null) TagV($"<b><color=#{acc}>Menu</color></b> {mA}", P(SchLMenu), imgBot - 0.05f);
+        }
+
+        // Blocco testo "Thumbstick" (click + 4 direzioni) a lato dello schema, con leader allo stick.
+        void StickBlock(string role, string acc, string dim, Vector3 stickAnchor, float edgeX, bool toRight)
+        {
+            string click = ActionFor(role, ControllerShortcuts.Btn.StickClick);
+            string up = ActionFor(role, ControllerShortcuts.Btn.StickUp);
+            string down = ActionFor(role, ControllerShortcuts.Btn.StickDown);
+            string lf = ActionFor(role, ControllerShortcuts.Btn.StickLeft);
+            string rt = ActionFor(role, ControllerShortcuts.Btn.StickRight);
+            string text =
+                $"<b><color=#{acc}>Thumbstick</color></b>\n" +
+                $"<color={dim}>Click</color> {click}\n" +
+                $"<color={dim}>Up</color> {up}\n<color={dim}>Down</color> {down}\n" +
+                $"<color={dim}>Left</color> {lf}\n<color={dim}>Right</color> {rt}";
+            const float w = 0.15f;
+            var align = toRight ? TextAlignmentOptions.Left : TextAlignmentOptions.Right;
+            float cx = toRight ? edgeX + w * 0.5f : edgeX - w * 0.5f;
+            MakeLabel(shortcutsPanel.transform, text, new Vector3(cx, 0f, -0.005f),
+                new Vector2(w, 0.13f), SliderLabelFont * 0.8f, align);
+            Leader(stickAnchor, new Vector3(edgeX, 0.01f, -0.0052f));
+            AnchorDot(stickAnchor, 0.009f);
+        }
+
+
+        // Anello accent sul tasto: disco accent + disco interno scuro (≈ colore del tasto),
+        // così evidenzia il tasto senza coprirlo.
+        void AnchorDot(Vector3 pos, float d)
+        {
+            MakeRounded(shortcutsPanel.transform, "Mark", pos, new Vector2(d, d), d * 0.5f, AccentColor, QueueIcon);
+            float inner = d * 0.52f;
+            var p = pos; p.z = -0.0068f;
+            MakeRounded(shortcutsPanel.transform, "MarkInner", p, new Vector2(inner, inner), inner * 0.5f,
+                new Color(0.13f, 0.13f, 0.16f, 1f), QueueIcon);
+        }
+
+        // Linea-guida sottile tra due punti (barra ruotata).
+        void Leader(Vector3 from, Vector3 to)
+        {
+            Vector3 mid = (from + to) * 0.5f;
+            mid.z = -0.0052f;
+            float len = Vector2.Distance(new Vector2(from.x, from.y), new Vector2(to.x, to.y));
+            var bar = MakeRounded(shortcutsPanel.transform, "Leader", mid,
+                new Vector2(len, 0.0018f), 0.0009f, LeaderColor, QueueControl);
+            float ang = Mathf.Atan2(to.y - from.y, to.x - from.x) * Mathf.Rad2Deg;
+            bar.transform.localRotation = Quaternion.Euler(0f, 0f, ang);
         }
 
         static void SetLayerRecursively(GameObject go, int layer)
