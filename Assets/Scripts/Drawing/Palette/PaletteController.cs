@@ -44,8 +44,16 @@ namespace MixedRealityProject.Drawing
         // "sotto" e non risponde a ray/punta, così non si tocca per sbaglio. PaletteRay e
         // PaletteButton consultano IsInteractable prima di agire.
         public static Transform ModalRoot;
+
+        // Il bottone ellipsi (...) che apre/chiude il menu Options resta SEMPRE premibile,
+        // anche mentre il menu modale è aperto: così funziona da vero toggle (un click apre,
+        // il click successivo sullo stesso bottone chiude). Senza questa eccezione il bottone
+        // sarebbe "sotto" il proprio modale e non potrebbe richiuderlo.
+        public static GameObject OptionsToggleButton;
         public static bool IsInteractable(GameObject go)
-            => ModalRoot == null || go.transform.IsChildOf(ModalRoot);
+            => ModalRoot == null
+               || go.transform.IsChildOf(ModalRoot)
+               || go == OptionsToggleButton;
 
         static readonly Color PanelColor = new(0.10f, 0.10f, 0.12f, 0.96f);
         static readonly Color ButtonColor = new(0.22f, 0.22f, 0.27f, 1f);
@@ -97,6 +105,14 @@ namespace MixedRealityProject.Drawing
         GameObject shortcutsPanel;
         bool shortcutsOpen;
 
+        // Geometria per ancorare i pop-up (Options/Shortcuts) accanto al bottone ellipsi
+        // (...) della striscia azioni: lato (destra per i destri), bordo esterno X della
+        // striscia e Y del bottone. Aggiornati a ogni BuildPanel; letti da PositionMenus.
+        float menuSide = 1f;
+        float actionStripOuterX;
+        float optionsButtonY;
+        Vector2 optionsSize, shortcutsSize;
+
         // Camera.main fa una FindGameObjectWithTag interna a ogni chiamata: la testa
         // non cambia, quindi la cachiamo una volta invece di interrogarla per frame.
         Camera head;
@@ -120,6 +136,7 @@ namespace MixedRealityProject.Drawing
             BuildPanel();
             BuildOptionsPanel(); // sotto-pannello impostazioni (separato, sopravvive ai Rebuild)
             BuildShortcutsPanel(); // pannello scorciatoie in sola lettura (aperto da Options)
+            PositionMenus(); // ancora i pop-up accanto al bottone ellipsi, sul lato giusto
             // Tutti i controlli appena creati vanno sul layer della palette (per il ray).
             SetLayerRecursively(gameObject, PaletteLayer);
             StrokeSettings.RecentColorsChanged += RefreshRecents;
@@ -452,8 +469,35 @@ namespace MixedRealityProject.Drawing
             lastTool = (ToolMode)(-1);
             lastType = -1;
             BuildPanel();
+            PositionMenus(); // il lato della striscia azioni è cambiato: riancora i pop-up
             SetLayerRecursively(gameObject, PaletteLayer);
             RefreshRecents();
+        }
+
+        // Ancora i pop-up Options/Shortcuts accanto al bottone ellipsi (...) della striscia
+        // azioni: a destra del bottone per i destri, a sinistra per i mancini (mai sopra la
+        // palette). Chiamato all'avvio e a ogni Rebuild, così la posizione segue la mano.
+        void PositionMenus()
+        {
+            const float gap = 0.014f;
+            const float paletteHalfH = 0.24f;
+
+            if (optionsPanel != null)
+            {
+                float cx = actionStripOuterX + menuSide * (gap + optionsSize.x * 0.5f);
+                // Centrato sul bottone ellipsi, ma vincolato a restare tutto entro l'altezza
+                // della palette (così non sborda sopra il bordo né sotto la mano).
+                float cy = Mathf.Clamp(optionsButtonY,
+                    -paletteHalfH + optionsSize.y * 0.5f, paletteHalfH - optionsSize.y * 0.5f);
+                optionsPanel.transform.localPosition = new Vector3(cx, cy, -0.02f);
+            }
+
+            if (shortcutsPanel != null)
+            {
+                float cx = actionStripOuterX + menuSide * (gap + shortcutsSize.x * 0.5f);
+                // Pannello più alto: centrato verticalmente sulla palette così resta intero.
+                shortcutsPanel.transform.localPosition = new Vector3(cx, 0f, -0.022f);
+            }
         }
 
         // Sotto-pannello impostazioni, aperto/chiuso dal bottone "Options" (icona tre
@@ -463,12 +507,10 @@ namespace MixedRealityProject.Drawing
         void BuildOptionsPanel()
         {
             var size = new Vector2(0.26f, 0.225f);
-            // Fluttua un po' SOPRA il pannello principale (metà altezza palette ~0.24),
-            // con un piccolo stacco, e leggermente più avanti (Z negativa) così non si
-            // confonde con i controlli sotto.
-            const float paletteHalfH = 0.24f;
-            float y = paletteHalfH + 0.025f + size.y * 0.5f;
-            optionsPanel = MakeRounded(transform, "OptionsPanel", new Vector3(0f, y, -0.02f),
+            optionsSize = size;
+            // La posizione finale (accanto al bottone ellipsi, sul lato della mano) è data
+            // da PositionMenus: qui basta crearlo, ci pensa lei ad ancorarlo.
+            optionsPanel = MakeRounded(transform, "OptionsPanel", Vector3.zero,
                 size, 0.026f, PanelColor, QueuePanel);
 
             float top = size.y * 0.5f;
@@ -494,38 +536,49 @@ namespace MixedRealityProject.Drawing
             MakeLabel(close.transform, "X", new Vector3(0f, 0.001f, -0.004f),
                 closeCell.Size, SliderLabelFont, TextAlignmentOptions.Center);
 
-            // Voce: handedness. Un solo bottone che alterna mano dominante; la label mostra
-            // la modalità verso cui si commuterebbe (Left-Handed se ora siamo a destra,
-            // Right-Handed se ora siamo a sinistra) e si illumina (accent) quando mancino.
+            // Voce: handedness come controllo SEGMENTATO a due segmenti (mano sinistra |
+            // mano destra). Esattamente un segmento è attivo: quello della mano corrente è
+            // evidenziato (accent); toccare un segmento applica subito quella modalità.
             var handCell = new Cell
             {
                 Center = new Vector3(0f, 0.022f, -0.004f),
                 Size = new Vector2(size.x - 0.05f, 0.05f)
             };
-            var hand = MakeRoundedButton(optionsPanel.transform, "HandednessToggle",
-                handCell.Center, handCell.Size, Mathf.Min(0.014f, handCell.Size.y * 0.4f),
-                ButtonColor, () => StrokeSettings.LeftHanded = !StrokeSettings.LeftHanded);
-            hand.GetComponent<PaletteButton>().ToggleState = () => StrokeSettings.LeftHanded;
-            var handLabel = MakeLabel(hand.transform, "", new Vector3(0f, 0f, -0.004f),
-                handCell.Size, ToggleFont, TextAlignmentOptions.Center);
-            // Icona mano (sinistra/destra) a sinistra della label: mostra la mano ATTUALMENTE
-            // selezionata (destra se destrimani, sinistra se mancini). Si aggiorna nel sync sotto.
-            float handIcon = Mathf.Min(handCell.Size.y * 0.6f, 0.03f);
-            float handIconX = -handCell.Size.x * 0.5f + handIcon * 0.5f + 0.012f;
-            var handIconMat = MakeTexQuad(hand.transform, ToolIcon.Get("hand-right"),
-                new Vector3(handIconX, 0f, -0.005f), new Vector2(handIcon, handIcon));
-            var handRend = hand.GetComponent<Renderer>();
+            const float segGap = 0.006f;
+            float segW = (handCell.Size.x - segGap) * 0.5f;
+            float segCorner = Mathf.Min(0.014f, handCell.Size.y * 0.4f);
+            float segIcon = Mathf.Min(handCell.Size.y * 0.7f, 0.034f);
+            float segDX = (segW + segGap) * 0.5f;
+
+            // Segmento sinistro = mancino.
+            var leftSeg = MakeRoundedButton(optionsPanel.transform, "HandLeftSeg",
+                new Vector3(handCell.Center.x - segDX, handCell.Center.y, handCell.Center.z),
+                new Vector2(segW, handCell.Size.y), segCorner, ButtonColor,
+                () => StrokeSettings.LeftHanded = true);
+            MakeTexQuad(leftSeg.transform, ToolIcon.Get("hand-left"),
+                new Vector3(0f, 0f, -0.005f), new Vector2(segIcon, segIcon));
+            var leftRend = leftSeg.GetComponent<Renderer>();
+
+            // Segmento destro = destrimani.
+            var rightSeg = MakeRoundedButton(optionsPanel.transform, "HandRightSeg",
+                new Vector3(handCell.Center.x + segDX, handCell.Center.y, handCell.Center.z),
+                new Vector2(segW, handCell.Size.y), segCorner, ButtonColor,
+                () => StrokeSettings.LeftHanded = false);
+            MakeTexQuad(rightSeg.transform, ToolIcon.Get("hand-right"),
+                new Vector3(0f, 0f, -0.005f), new Vector2(segIcon, segIcon));
+            var rightRend = rightSeg.GetComponent<Renderer>();
+
+            // Evidenzia esattamente il segmento attivo; aggiorna solo quando la mano cambia.
             bool handInit = false, handLast = false;
             optionsSync.Add(() =>
             {
-                bool on = StrokeSettings.LeftHanded;
-                if (handInit && on == handLast)
+                bool left = StrokeSettings.LeftHanded;
+                if (handInit && left == handLast)
                     return;
                 handInit = true;
-                handLast = on;
-                handLabel.text = on ? "Right-Handed" : "Left-Handed";
-                handRend.material.SetColor(BaseColorId, on ? AccentColor : ButtonColor);
-                handIconMat.SetTexture("_BaseMap", ToolIcon.Get(on ? "hand-left" : "hand-right"));
+                handLast = left;
+                leftRend.material.SetColor(BaseColorId, left ? AccentColor : ButtonColor);
+                rightRend.material.SetColor(BaseColorId, left ? ButtonColor : AccentColor);
             });
 
             // Voce: "View Shortcuts" (icona saetta). Apre il pannello scorciatoie in sola
@@ -590,45 +643,47 @@ namespace MixedRealityProject.Drawing
         // Solo la X è premibile; le righe sono testo. Vive a parte come optionsPanel.
         void BuildShortcutsPanel()
         {
-            var size = new Vector2(0.46f, 0.32f);
-            const float paletteHalfH = 0.24f;
-            float y = paletteHalfH + 0.025f + size.y * 0.5f;
-            shortcutsPanel = MakeRounded(transform, "ShortcutsPanel", new Vector3(0f, y, -0.022f),
+            // Pannello ampio: le scorciatoie usano un font pari alle altre label e devono
+            // riempire tutta l'area utile, quindi serve spazio in larghezza e altezza. La
+            // posizione finale (accanto al bottone ellipsi) è data da PositionMenus.
+            var size = new Vector2(0.70f, 0.44f);
+            shortcutsSize = size;
+            shortcutsPanel = MakeRounded(transform, "ShortcutsPanel", Vector3.zero,
                 size, 0.026f, PanelColor, QueuePanel);
 
             float top = size.y * 0.5f;
 
             // Header: icona saetta + titolo, linea accent, X di chiusura.
             MakeIconImage(shortcutsPanel.transform, "bolt",
-                new Vector3(-size.x * 0.5f + 0.03f, top - 0.026f, -0.005f), 0.026f);
+                new Vector3(-size.x * 0.5f + 0.03f, top - 0.03f, -0.005f), 0.028f);
             MakeLabel(shortcutsPanel.transform, "Shortcuts",
-                new Vector3(-size.x * 0.5f + 0.078f, top - 0.026f, -0.004f),
+                new Vector3(-size.x * 0.5f + 0.082f, top - 0.03f, -0.004f),
                 new Vector2(size.x - 0.16f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
             MakeRounded(shortcutsPanel.transform, "HeaderSep",
-                new Vector3(0f, top - 0.05f, -0.004f),
+                new Vector3(0f, top - 0.058f, -0.004f),
                 new Vector2(size.x - 0.05f, 0.0035f), 0.0017f, AccentColor, QueueControl);
             var closeCell = new Cell
             {
-                Center = new Vector3(size.x * 0.5f - 0.026f, top - 0.026f, -0.004f),
-                Size = new Vector2(0.034f, 0.034f)
+                Center = new Vector3(size.x * 0.5f - 0.03f, top - 0.03f, -0.004f),
+                Size = new Vector2(0.036f, 0.036f)
             };
             var close = MakeRoundedButton(shortcutsPanel.transform, "ShortcutsClose",
                 closeCell.Center, closeCell.Size, 0.01f, ButtonColor, CloseShortcutsPanel);
             MakeLabel(close.transform, "X", new Vector3(0f, 0.001f, -0.004f),
                 closeCell.Size, SliderLabelFont, TextAlignmentOptions.Center);
 
-            // Corpo a due colonne. Le righe partono sotto la linea di header e finiscono
-            // sopra la nota a piè di pagina.
-            float bodyTop = top - 0.066f;
-            float bodyBottom = -top + 0.03f;
+            // Corpo a due colonne che riempiono tutta l'area tra header e nota a piè di
+            // pagina (colonne larghe e ben distanziate per ospitare il font ingrandito).
+            float bodyTop = top - 0.078f;
+            float bodyBottom = -top + 0.045f;
             float boxH = bodyTop - bodyBottom;
             float centerY = (bodyTop + bodyBottom) * 0.5f;
-            const float colW = 0.21f;
-            BuildShortcutColumn(ControllerShortcuts.PaletteHandName, -0.115f, centerY, colW, boxH);
-            BuildShortcutColumn(ControllerShortcuts.BrushHandName, 0.115f, centerY, colW, boxH);
+            const float colW = 0.32f, colX = 0.175f;
+            BuildShortcutColumn(ControllerShortcuts.PaletteHandName, -colX, centerY, colW, boxH);
+            BuildShortcutColumn(ControllerShortcuts.BrushHandName, colX, centerY, colW, boxH);
 
             MakeLabel(shortcutsPanel.transform, "Works with the palette closed.",
-                new Vector3(0f, -top + 0.016f, -0.004f),
+                new Vector3(0f, -top + 0.022f, -0.004f),
                 new Vector2(size.x - 0.04f, 0.02f), SliderLabelFont * 0.8f, TextAlignmentOptions.Center);
 
             SetLayerRecursively(shortcutsPanel, PaletteLayer);
@@ -638,7 +693,8 @@ namespace MixedRealityProject.Drawing
         // Una colonna del pannello: header mano + righe (raggruppate) da ControllerShortcuts.All.
         void BuildShortcutColumn(string hand, float centerX, float centerY, float width, float boxH)
         {
-            const float ShortcutFont = 0.085f;
+            // Font pari alle altre label della UI (slider/opzioni), non più ridotto.
+            const float ShortcutFont = SliderLabelFont;
             string accent = ColorUtility.ToHtmlStringRGB(AccentColor);
             var sb = new System.Text.StringBuilder();
             sb.Append($"<b><color=#{accent}>{hand}</color></b>\n");
@@ -759,6 +815,10 @@ namespace MixedRealityProject.Drawing
             float side = StrokeSettings.LeftHanded ? -1f : 1f;
             float stripX = side * (panelSize.x * 0.5f + 0.012f + stripSize.x * 0.5f);
 
+            // Geometria per ancorare i pop-up accanto al bottone ellipsi (vedi PositionMenus).
+            menuSide = side;
+            actionStripOuterX = stripX + side * stripSize.x * 0.5f;
+
             var strip = MakeRounded(panel.transform, "ActionStrip", new Vector3(stripX, 0f, 0f),
                 stripSize, 0.016f, PanelColor, QueuePanel);
 
@@ -774,6 +834,13 @@ namespace MixedRealityProject.Drawing
                     0.013f,
                     ButtonColor,
                     actions[i].action);
+
+                // Il bottone ellipsi (...) = ancora dei pop-up e toggle sempre premibile.
+                if (actions[i].name == "options")
+                {
+                    optionsButtonY = y;
+                    OptionsToggleButton = b;
+                }
 
                 // Label piccola in alto, come nella striscia pennelli a sinistra.
                 MakeLabel(b.transform, actions[i].label,
