@@ -22,6 +22,13 @@ namespace MixedRealityProject.Drawing
         public Func<bool> ToggleState;
 
         /// <summary>
+        /// Se true, la pressione NON emette il click di default: l'azione collegata fornisce
+        /// già un proprio suono (apertura menu/shortcuts), e suonarli insieme darebbe una
+        /// sgradevole sovrapposizione audio. Impostata da PaletteController.
+        /// </summary>
+        public bool SilentPress;
+
+        /// <summary>
         /// Registro di tutti i pulsanti attivi: lo snap-to-button del PaletteRay lo
         /// scorre invece di fare un Physics.OverlapSphere da 2 m su tutta la scena
         /// ogni frame. I pulsanti sono pochi e noti, non serve la fisica.
@@ -82,7 +89,7 @@ namespace MixedRealityProject.Drawing
             OnPressed?.Invoke(); // per i toggle questo aggiorna già lo stato letto sotto
             if (ToggleState != null)
                 UiFeedback.Instance?.Toggle(ToggleState());
-            else
+            else if (!SilentPress)
                 UiFeedback.Instance?.Press();
             StartCoroutine(PressAnim());
         }

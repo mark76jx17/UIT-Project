@@ -29,6 +29,7 @@ namespace MixedRealityProject.Drawing
 
         TextMeshPro label;
         Material panelMat;
+        MeshRenderer panelRenderer;
         Transform head;
         float timer;
 
@@ -42,7 +43,7 @@ namespace MixedRealityProject.Drawing
         {
             instance = this;
             Build();
-            SetAlpha(0f);
+            SetVisible(false); // niente messaggio = niente quad renderizzato (vedi sotto)
         }
 
         void OnDestroy()
@@ -58,7 +59,8 @@ namespace MixedRealityProject.Drawing
             panel.AddComponent<MeshFilter>().mesh = RoundedMesh.Rect(0.30f, 0.07f, 0.02f);
             panelMat = BrushMaterials.CreateUnlit(PanelColor); // trasparente: può sfumare
             panelMat.renderQueue = QueuePanel;
-            panel.AddComponent<MeshRenderer>().material = panelMat;
+            panelRenderer = panel.AddComponent<MeshRenderer>();
+            panelRenderer.material = panelMat;
 
             var textGO = new GameObject("ToastText");
             textGO.transform.SetParent(transform, false);
@@ -81,6 +83,7 @@ namespace MixedRealityProject.Drawing
         {
             label.text = message;
             timer = HoldTime + FadeTime;
+            SetVisible(true);
         }
 
         void LateUpdate()
@@ -101,11 +104,23 @@ namespace MixedRealityProject.Drawing
             {
                 timer -= Time.deltaTime;
                 SetAlpha(timer >= FadeTime ? 1f : Mathf.Clamp01(timer / FadeTime));
-                // Quando il toast finisce, azzera del tutto l'alpha: senza questo resta
-                // un residuo (~0.04) sul pannello scuro → ombra sempre visibile in scena.
+                // Finito il messaggio SPEGNI i renderer: non basta azzerare l'alpha del colore,
+                // perché un quad trasparente comunque renderizzato resta un rettangolo che
+                // fluttua davanti allo sguardo e "buca" l'occlusione del passthrough (see-through)
+                // quando passa sopra le altre interfacce. Niente messaggio = niente render.
                 if (timer <= 0f)
-                    SetAlpha(0f);
+                    SetVisible(false);
             }
+        }
+
+        // Accende/spegne il render del toast (pannello + testo): a riposo è completamente
+        // assente dal frame, così non lascia un rettangolo fantasma sul passthrough.
+        void SetVisible(bool visible)
+        {
+            if (panelRenderer != null)
+                panelRenderer.enabled = visible;
+            if (label != null)
+                label.enabled = visible;
         }
 
         void SetAlpha(float a)

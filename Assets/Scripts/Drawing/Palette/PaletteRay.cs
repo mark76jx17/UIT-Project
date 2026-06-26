@@ -62,7 +62,13 @@ namespace MixedRealityProject.Drawing
                 ? (Brush.Tip.position - transform.position).normalized
                 : transform.forward;
 
-            bool onPalette = TryHitPalette(origin, dir, out var hit);
+            // Prima cerca un CONTROLLO (pulsante/slider/picker) lungo il ray; se non c'è ma
+            // un menu modale è aperto, accetta un hit sul suo SFONDO così il ray resta
+            // visibile su tutta l'area del pannello (non solo sopra la ✕), senza renderlo
+            // premibile. Risolve "il ray sparisce sulle Shortcuts".
+            bool onControl = TryHitPalette(origin, dir, out var hit);
+            bool onModalSurface = !onControl && TryHitModalSurface(origin, dir, out hit);
+            bool onPalette = onControl || onModalSurface;
 
             float trigger = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, StrokeSettings.BrushHand);
             bool pressed = trigger >= pressThreshold;
@@ -71,19 +77,21 @@ namespace MixedRealityProject.Drawing
             // Latch della modalità al fronte di salita del trigger: se inizi a premere
             // puntando la palette → interazione palette per tutta la pressione; se inizi a
             // disegnare (non sulla palette) → la palette viene IGNORATA fino al rilascio,
-            // anche se il raggio la attraversa a metà tratto. Così non si interagisce per
-            // sbaglio con la palette mentre si disegna.
+            // anche se il raggio la attraversa a metà tratto.
             if (justPressed)
                 startedOnPalette = onPalette;
             wasPressed = pressed;
 
-            // A trigger premuto vale la modalità latchata; a riposo il raggio fa solo da
-            // hint quando punta la palette.
-            bool paletteActive = onPalette && (!pressed || startedOnPalette);
+            // Disegno soppresso: a trigger PREMUTO vale il latch (iniziato sulla palette),
+            // ANCHE se il bersaglio sparisce a metà pressione (es. la ✕ che chiude il pannello
+            // o "View Shortcuts" che lo cambia): senza questo, appena onPalette torna falso il
+            // pennello riprendeva a disegnare un "pallino" finché si teneva il trigger. A riposo
+            // il raggio fa solo da hint quando punta la palette.
+            Brush.SuppressDrawing = pressed ? startedOnPalette : onPalette;
 
-            Brush.SuppressDrawing = paletteActive;
-
-            if (!paletteActive)
+            // Il raggio è visibile quando punta la palette ed è coerente con la modalità latchata.
+            bool showRay = onPalette && (!pressed || startedOnPalette);
+            if (!showRay)
             {
                 line.enabled = false;
                 SetHoveredButton(null);
@@ -93,6 +101,13 @@ namespace MixedRealityProject.Drawing
             line.enabled = true;
             line.SetPosition(0, origin);
             line.SetPosition(1, hit.point);
+
+            // Solo sui controlli c'è hover/press: sullo sfondo modale il ray si vede ma non preme.
+            if (!onControl)
+            {
+                SetHoveredButton(null);
+                return;
+            }
 
             // Hover: evidenzia il pulsante puntato anche prima di premere.
             SetHoveredButton(hit.collider.GetComponent<PaletteButton>());
@@ -113,6 +128,33 @@ namespace MixedRealityProject.Drawing
             {
                 control.PressAt(hit.point);
             }
+        }
+
+        // Hit sul fondo del pannello modale aperto (Options/Shortcuts): serve solo a tenere
+        // il raggio visibile sull'intera area del pannello. Non è un controllo: niente press.
+        bool TryHitModalSurface(Vector3 origin, Vector3 dir, out RaycastHit hit)
+        {
+            hit = default;
+            var modal = PaletteController.ModalRoot;
+            if (modal == null)
+                return false;
+
+            int count = Physics.RaycastNonAlloc(origin, dir, rayBuffer, maxDistance, PaletteMask, QueryTriggerInteraction.Collide);
+            float nearest = float.MaxValue;
+            bool found = false;
+            for (int i = 0; i < count; i++)
+            {
+                var h = rayBuffer[i];
+                if (!h.transform.IsChildOf(modal)) // include il root del pannello stesso
+                    continue;
+                if (h.distance < nearest)
+                {
+                    nearest = h.distance;
+                    hit = h;
+                    found = true;
+                }
+            }
+            return found;
         }
 
         void SetHoveredButton(PaletteButton button)

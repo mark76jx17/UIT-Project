@@ -28,7 +28,7 @@ namespace MixedRealityProject.Drawing.EditorTools
             var root = new GameObject("ShortcutsPreviewRoot");
             try
             {
-                PaletteController.DebugAnchorGrid = true; // metti false per il render finale
+                PaletteController.DebugAnchorGrid = false; // true per ritarare gli anchor
                 var pc = root.AddComponent<PaletteController>();
                 var panel = pc.EditorBuildShortcutsPanel();
                 if (panel == null)
@@ -38,7 +38,11 @@ namespace MixedRealityProject.Drawing.EditorTools
                 }
 
                 // Il pannello è centrato sull'origine e rivolto verso -Z: camera dal lato -Z.
+                // FIGLIA di root: così il DestroyImmediate(root) nel finally la elimina e non
+                // resta una camera orfana in scena (col suo background grigio coprirebbe tutto
+                // il passthrough se la scena venisse salvata).
                 var camGO = new GameObject("PreviewCam");
+                camGO.transform.SetParent(root.transform, false);
                 var cam = camGO.AddComponent<Camera>();
                 cam.clearFlags = CameraClearFlags.SolidColor;
                 cam.backgroundColor = new Color(0.30f, 0.30f, 0.33f, 1f); // grigio neutro per leggere il pannello scuro

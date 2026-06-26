@@ -20,9 +20,9 @@ namespace MixedRealityProject.Drawing
         public Vector3 localOffset = new(0f, 0.06f, 0.04f);
         public Vector3 localEuler = new(-40f, 180f, 0f);
         [Tooltip("Sul visore: quanto sopra la mano fluttua il pannello. Deve superare la " +
-                 "metà altezza del pannello (~0.22) così il bordo inferiore resta sopra la " +
-                 "mano e il controller non lo trapassa.")]
-        public float heightAboveHand = 0.22f;
+                 "metà altezza del pannello (~0.24) così il bordo inferiore resta sopra la " +
+                 "mano e il controller che la tiene non lo trapassa.")]
+        public float heightAboveHand = 0.30f;
 
 #if UNITY_EDITOR
         [SerializeField] bool pinPaletteInEditor = true;
@@ -517,6 +517,7 @@ namespace MixedRealityProject.Drawing
             optionsPanel = MakeRounded(transform, "OptionsPanel", Vector3.zero,
                 size, 0.026f, PanelColor, QueuePanel);
             optionsPanel.AddComponent<FacePlayer>(); // guarda sempre l'utente quando aperto
+            AddModalSurfaceCollider(optionsPanel, size); // ray visibile su tutta l'area
 
             float top = size.y * 0.5f;
 
@@ -538,8 +539,8 @@ namespace MixedRealityProject.Drawing
             };
             var close = MakeRoundedButton(optionsPanel.transform, "OptionsClose",
                 closeCell.Center, closeCell.Size, 0.01f, ButtonColor, CloseOptionsPanel);
-            MakeLabel(close.transform, "X", new Vector3(0f, 0.001f, -0.004f),
-                closeCell.Size, SliderLabelFont, TextAlignmentOptions.Center);
+            close.GetComponent<PaletteButton>().SilentPress = true; // il suono lo dà MenuToggle
+            MakeIconImage(close.transform, "close", new Vector3(0f, 0f, -0.005f), closeCell.Size.x * 0.6f);
 
             // Voce: handedness come controllo SEGMENTATO a due segmenti (mano sinistra |
             // mano destra). Esattamente un segmento è attivo: quello della mano corrente è
@@ -596,6 +597,8 @@ namespace MixedRealityProject.Drawing
             var sc = MakeRoundedButton(optionsPanel.transform, "ViewShortcuts",
                 scCell.Center, scCell.Size, Mathf.Min(0.014f, scCell.Size.y * 0.4f),
                 ButtonColor, OpenShortcutsPanel);
+            // Il suono lo dà ShortcutsToggle: niente click di default, sarebbe sovrapposto.
+            sc.GetComponent<PaletteButton>().SilentPress = true;
             float scIcon = Mathf.Min(scCell.Size.y * 0.6f, 0.03f);
             float scIconX = -scCell.Size.x * 0.5f + scIcon * 0.5f + 0.012f;
             MakeIconImage(sc.transform, "bolt", new Vector3(scIconX, 0f, -0.005f), scIcon);
@@ -606,15 +609,24 @@ namespace MixedRealityProject.Drawing
             optionsPanel.SetActive(false);
         }
 
+        // Toggle unico del menu (☰ del controller sinistro e bottone "..." nella palette):
+        // - se è aperto QUALCOSA del menu (Options, o le Shortcuts che gli stanno sopra) chiude
+        //   TUTTO il menu, lasciando la palette aperta;
+        // - altrimenti apre Options e, se la palette era chiusa, la apre con sé (il menu vive
+        //   sulla palette). SetActive/ModalRoot li sincronizza AnimateVisibility ogni frame.
         void ToggleOptionsPanel()
         {
-            optionsOpen = !optionsOpen;
-            if (optionsPanel != null)
+            if (optionsOpen || shortcutsOpen)
             {
-                optionsPanel.SetActive(optionsOpen);
-                ModalRoot = optionsOpen ? optionsPanel.transform : null;
+                optionsOpen = false;
+                shortcutsOpen = false;
             }
-            UiFeedback.Instance?.PanelToggle(optionsOpen);
+            else
+            {
+                optionsOpen = true;
+                isOpen = true; // palette chiusa: il menu la apre insieme a sé
+            }
+            UiFeedback.Instance?.MenuToggle(optionsOpen);
         }
 
         /// <summary>Apri/chiudi il menu Options da fuori (scorciatoia controller A/X).</summary>
@@ -623,10 +635,11 @@ namespace MixedRealityProject.Drawing
         void CloseOptionsPanel()
         {
             optionsOpen = false;
+            shortcutsOpen = false; // chiude anche un'eventuale Shortcuts sopra Options
             if (optionsPanel != null)
                 optionsPanel.SetActive(false);
             ModalRoot = null;
-            UiFeedback.Instance?.PanelToggle(false);
+            UiFeedback.Instance?.MenuToggle(false);
         }
 
         // Apre il pannello scorciatoie (sola lettura). Resta sopra Options: lasciando
@@ -634,13 +647,13 @@ namespace MixedRealityProject.Drawing
         void OpenShortcutsPanel()
         {
             shortcutsOpen = true;
-            UiFeedback.Instance?.PanelToggle(true);
+            UiFeedback.Instance?.ShortcutsToggle(true);
         }
 
         void CloseShortcutsPanel()
         {
             shortcutsOpen = false;
-            UiFeedback.Instance?.PanelToggle(false);
+            UiFeedback.Instance?.ShortcutsToggle(false);
         }
 
 #if UNITY_EDITOR
@@ -668,6 +681,7 @@ namespace MixedRealityProject.Drawing
             shortcutsPanel = MakeRounded(transform, "ShortcutsPanel", Vector3.zero,
                 size, 0.026f, PanelColor, QueuePanel);
             shortcutsPanel.AddComponent<FacePlayer>(); // guarda sempre l'utente quando aperto
+            AddModalSurfaceCollider(shortcutsPanel, size); // ray visibile su tutta l'area
 
             float top = size.y * 0.5f;
 
@@ -687,8 +701,8 @@ namespace MixedRealityProject.Drawing
             };
             var close = MakeRoundedButton(shortcutsPanel.transform, "ShortcutsClose",
                 closeCell.Center, closeCell.Size, 0.01f, ButtonColor, CloseShortcutsPanel);
-            MakeLabel(close.transform, "X", new Vector3(0f, 0.001f, -0.004f),
-                closeCell.Size, SliderLabelFont, TextAlignmentOptions.Center);
+            close.GetComponent<PaletteButton>().SilentPress = true; // il suono lo dà ShortcutsToggle
+            MakeIconImage(close.transform, "close", new Vector3(0f, 0f, -0.005f), closeCell.Size.x * 0.6f);
 
             // UN solo schema (line-art con entrambi i controller, importato e schiarito),
             // centrato; attorno le etichette delle scorciatoie con linea-guida e anello sul
@@ -946,6 +960,8 @@ namespace MixedRealityProject.Drawing
                 {
                     optionsButtonY = y;
                     OptionsToggleButton = b;
+                    // Il suono lo dà MenuToggle: niente click di default (evita sovrapposizione).
+                    b.GetComponent<PaletteButton>().SilentPress = true;
                 }
 
                 // Label piccola in alto, come nella striscia pennelli a sinistra.
@@ -1087,6 +1103,17 @@ namespace MixedRealityProject.Drawing
             collider.size = new Vector3(size.x, size.y, 0.012f);
             go.AddComponent<PaletteButton>().OnPressed += action;
             return go;
+        }
+
+        // Collider "di superficie" sul fondo di un pannello modale (Options/Shortcuts): non è
+        // un controllo (niente PaletteButton), serve solo a far sì che il PaletteRay veda il
+        // pannello e tenga il raggio visibile su tutta la sua area, anche dove non ci sono
+        // pulsanti. Sottile e dietro ai pulsanti, che restano i primi bersagli del ray.
+        static void AddModalSurfaceCollider(GameObject panel, Vector2 size)
+        {
+            var col = panel.AddComponent<BoxCollider>();
+            col.isTrigger = true;
+            col.size = new Vector3(size.x, size.y, 0.006f);
         }
 
         // Etichetta TextMeshPro a dimensione fissa (niente auto-size che gonfia il testo).

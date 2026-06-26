@@ -83,6 +83,37 @@ chiamate `Vibrate(...)` per l'aptico): **un unico posto da regolare**.
   ora chiama `PanelToggle` (anche dal tasto **P** in editor); marca i toggle con
   `ToggleState`; rimossa la vecchia coroutine `HapticPulse`.
 
+## Aggiornamento giugno 2026 — suoni distinti menu/shortcuts + fix toast fantasma
+
+**Suoni distinti per Menu e Shortcuts (niente più sovrapposizione).** Prima palette,
+menu Options e pannello Shortcuts usavano *tutti* lo stesso sweep `PanelToggle`. Ora:
+- `MenuToggle(bool)` — **Sweep 560→1200 / 1200→560 Hz**, più brillante e un filo più lungo
+  della palette: "apertura impostazioni" riconoscibile.
+- `ShortcutsToggle(bool)` — **TwoTone** (nuova forma d'onda: due note consecutive con
+  inviluppo a finestra, un piccolo arpeggio 660→990 / 990→660 Hz): timbro nettamente
+  diverso dagli sweep, impossibile da scambiare a orecchio.
+- la palette resta su `PanelToggle` (Sweep 420↔940).
+
+**Niente sovrapposizione audio.** I bottoni a pannello che innescano questi suoni
+(`...`/Options, `View Shortcuts`, e le due **✕** di chiusura) facevano partire *anche* il
+click di default di `PaletteButton.Press()`. Aggiunto il flag `PaletteButton.SilentPress`:
+su quei bottoni il click di default è soppresso, così suona **solo** il relativo
+menu/shortcuts. Il tasto **☰** del controller non passa da `PaletteButton`, quindi era già
+pulito. Wiring: `ToggleOptionsPanel`/`CloseOptionsPanel` → `MenuToggle`;
+`OpenShortcutsPanel`/`CloseShortcutsPanel` → `ShortcutsToggle`.
+
+**Fix "rettangolo fantasma" del toast.** `ToastController` fluttua sempre davanti allo
+sguardo; a riposo veniva solo portato ad alpha 0, ma il **quad trasparente restava
+renderizzato** → rettangolo sempre presente che, non preservando l'alpha del framebuffer,
+"bucava" il passthrough quando passava sopra altre UI. Ora a riposo i **renderer del toast
+(pannello + testo) sono spenti** (`SetVisible(false)` in `Awake`/fine fade, `SetVisible(true)`
+in `Display`): niente messaggio = niente render = nessun rettangolo, nessun see-through.
+
+File toccati (aggiornamento): `Palette/UiFeedback.cs` (clip `menuOpen/menuClose/
+shortcutsOpen/shortcutsClose` + synth `TwoTone` + API `MenuToggle`/`ShortcutsToggle`),
+`Palette/PaletteButton.cs` (`SilentPress`), `Palette/PaletteController.cs` (wiring suoni +
+`SilentPress` sui 4 bottoni), `Toast.cs` (`SetVisible` + renderer spenti a riposo).
+
 ## Note / da verificare in Play
 
 - **Serve un `AudioListener` in scena** (di norma sul Center Eye dell'OVRCameraRig):

@@ -32,6 +32,7 @@ namespace MixedRealityProject.Drawing
                 case "load": SaveLoad(down: false); break;
                 case "clear": Trash(); break;
                 case "options": Ellipsis(); break;
+                case "close": Cross(); break;
                 case "bolt": Bolt(); break;
                 case "hand-right": Hand(mirror: false); break;
                 case "hand-left": Hand(mirror: true); break;
@@ -131,6 +132,15 @@ namespace MixedRealityProject.Drawing
             Disc(new(-0.34f, 0f), 0.13f);
             Disc(new(0f, 0f), 0.13f);
             Disc(new(0.34f, 0f), 0.13f);
+        }
+
+        // X di chiusura: due segmenti diagonali con estremità arrotondate (SDF), molto più
+        // pulita della lettera "X" del font. Centrata, leggermente rientrata dai bordi.
+        static void Cross()
+        {
+            const float r = 0.44f, th = 0.105f;
+            Seg(new(-r, -r), new(r, r), th);
+            Seg(new(-r, r), new(r, -r), th);
         }
 
         // Saetta (menu "View Shortcuts"): poligono pieno a zig-zag, stesso stile SDF

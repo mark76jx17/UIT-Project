@@ -49,6 +49,16 @@ namespace MixedRealityProject.Drawing
             if (rig == null)
                 Debug.LogWarning("[DrawingRig] OVRCameraRig non trovato: modalità desktop con Camera.main.");
 
+            // Pulisce gli orpelli visivi MR del template (comfort vignette della locomotion +
+            // EffectMesh che colora le superfici/"confini" della stanza). Vedi la coroutine.
+            StartCoroutine(NeutralizeMrVisualClutter());
+
+            // Sopprime il boundary/Guardian (i "confini" colorati che appaiono avvicinandosi ai
+            // bordi dell'area): in MR/passthrough da fermi è solo rumore visivo. OVRManager
+            // riconcilia questo flag chiamando RequestBoundaryVisibility.
+            if (OVRManager.instance != null)
+                OVRManager.instance.shouldBoundaryVisibilityBeSuppressed = true;
+
             brushGO = new GameObject("Brush");
             if (brushAnchor != null)
                 brushGO.transform.SetParent(brushAnchor, false);
@@ -115,6 +125,51 @@ namespace MixedRealityProject.Drawing
         }
 
         void OnDestroy() => StrokeSettings.LeftHandedChanged -= ApplyHandedness;
+
+        // Neutralizza la comfort vignette/tunneling della locomotion Meta SENZA disabilitare
+        // LocomotionTunneling: quel componente, all'avvio, è ciò che mette il FOV pieno (360°)
+        // e poi gestisce il fade; spegnerlo prima che si inizializzi lasciava il renderer
+        // TunnelingEffect bloccato sullo stato del prefab → vignette sempre chiusa. Invece
+        // appiattisco a 360° le curve di forza (rotazione/accelerazione/movimento): così, anche
+        // quando il destro genera un evento, il FOV richiesto è sempre pieno e l'effetto non si
+        // vede. Cerco per NOME (niente dipendenza dall'assembly Oculus.Interaction) e aspetto un
+        // frame, così tutti gli Awake/Start (incluso un eventuale *Setting che riscrive le curve)
+        // sono già passati e l'override è l'ultimo a vincere.
+        System.Collections.IEnumerator NeutralizeMrVisualClutter()
+        {
+            yield return null; // lascia inizializzare la locomotion (vignette aperta a riposo)
+
+            var flat = AnimationCurve.Constant(0f, 1f, 360f); // 360° = FOV pieno → nessuna vignette
+            foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (mb == null)
+                    continue;
+                var t = mb.GetType();
+                switch (t.Name)
+                {
+                    case "LocomotionTunneling":
+                        foreach (var prop in new[] { "RotationStrength", "AccelerationStrength", "MovementStrength" })
+                        {
+                            var p = t.GetProperty(prop);
+                            if (p != null && p.CanWrite)
+                                p.SetValue(mb, flat);
+                        }
+                        break;
+                    case "LocomotionComfortVignetteSetting":
+                        mb.enabled = false; // non far riscrivere curve di chiusura
+                        break;
+                    case "EffectMesh":
+                        // EffectMesh (MRUK) colora le superfici della stanza (i "confini"
+                        // celestini). HideMesh=true spegne i renderer già creati e, dato che
+                        // CreateMesh imposta renderer.enabled = !hideMesh, nasconde anche le mesh
+                        // generate più tardi quando MRUK finisce di caricare la stanza.
+                        var hide = t.GetProperty("HideMesh");
+                        if (hide != null && hide.CanWrite)
+                            hide.SetValue(mb, true);
+                        break;
+                }
+            }
+        }
 
         // Ancore in base alla mano dominante. Senza rig (desktop) le ancore mani sono
         // null e la palette ripiega sulla camera, come all'avvio.

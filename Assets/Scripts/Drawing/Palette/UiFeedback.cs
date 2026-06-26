@@ -23,6 +23,7 @@ namespace MixedRealityProject.Drawing
 
         AudioSource source;
         AudioClip click, toggleOn, toggleOff, hover, panelOpen, panelClose;
+        AudioClip menuOpen, menuClose, shortcutsOpen, shortcutsClose;
 
         // Vibrazione: un impulso "in corso" per ciascuna delle due mani usate dalla palette.
         struct Pulse { public float time, freq, amp; }
@@ -46,6 +47,14 @@ namespace MixedRealityProject.Drawing
             hover      = Blip("uiHover",     1600f, 1600f, 0.02f, 0.08f);
             panelOpen  = Sweep("uiPanelOpen", 420f,  940f, 0.14f, 0.40f);
             panelClose = Sweep("uiPanelClose", 940f, 420f, 0.14f, 0.40f);
+            // Menu Options: sweep più brillante e un filo più lungo della palette, così è
+            // riconoscibile come "apertura impostazioni" e non si confonde col pannello.
+            menuOpen   = Sweep("uiMenuOpen",   560f, 1200f, 0.17f, 0.38f);
+            menuClose  = Sweep("uiMenuClose", 1200f,  560f, 0.17f, 0.38f);
+            // Shortcuts: due note (arpeggio) invece di uno sweep continuo → timbro nettamente
+            // diverso da palette e menu, impossibile da scambiare a orecchio.
+            shortcutsOpen  = TwoTone("uiShortcutsOpen",  660f, 990f, 0.075f, 0.36f);
+            shortcutsClose = TwoTone("uiShortcutsClose", 990f, 660f, 0.075f, 0.36f);
         }
 
         void OnDestroy()
@@ -77,11 +86,25 @@ namespace MixedRealityProject.Drawing
             Vibrate(ref brush, StrokeSettings.BrushHand, 0.015f, freq: 0.3f, amp: 0.10f);
         }
 
-        /// <summary>Apertura/chiusura del pannello (mano palette).</summary>
+        /// <summary>Apertura/chiusura del pannello palette (mano palette).</summary>
         public void PanelToggle(bool open)
         {
             source.PlayOneShot(open ? panelOpen : panelClose);
             Vibrate(ref palette, StrokeSettings.PaletteHand, 0.05f, freq: 0.4f, amp: 0.50f);
+        }
+
+        /// <summary>Apertura/chiusura del menu Options (suono distinto dal pannello palette).</summary>
+        public void MenuToggle(bool open)
+        {
+            source.PlayOneShot(open ? menuOpen : menuClose);
+            Vibrate(ref palette, StrokeSettings.PaletteHand, 0.05f, freq: 0.4f, amp: 0.50f);
+        }
+
+        /// <summary>Apertura/chiusura del pannello Shortcuts (arpeggio, distinto da palette/menu).</summary>
+        public void ShortcutsToggle(bool open)
+        {
+            source.PlayOneShot(open ? shortcutsOpen : shortcutsClose);
+            Vibrate(ref palette, StrokeSettings.PaletteHand, 0.05f, freq: 0.35f, amp: 0.45f);
         }
 
         // ---- Vibrazione: timer per mano, la spegne Update ----
@@ -126,6 +149,27 @@ namespace MixedRealityProject.Drawing
                 float t = (float)i / n;
                 float env = Mathf.Exp(-6f * t);
                 float f = Mathf.Lerp(f0, f1, t);
+                phase += 2.0 * System.Math.PI * f / SampleRate;
+                data[i] = Mathf.Sin((float)phase) * env * vol;
+            }
+            var clip = AudioClip.Create(name, n, 1, SampleRate, false);
+            clip.SetData(data, 0);
+            return clip;
+        }
+
+        // Due note consecutive (f0 poi f1), ognuna con inviluppo a finestra: un piccolo
+        // "arpeggio" che suona diverso dagli sweep continui di palette/menu.
+        static AudioClip TwoTone(string name, float f0, float f1, float each, float vol)
+        {
+            int per = Mathf.Max(1, (int)(SampleRate * each));
+            int n = per * 2;
+            var data = new float[n];
+            double phase = 0;
+            for (int i = 0; i < n; i++)
+            {
+                float f = i < per ? f0 : f1;
+                float t = (i % per) / (float)per;
+                float env = Mathf.Sin(Mathf.PI * t);
                 phase += 2.0 * System.Math.PI * f / SampleRate;
                 data[i] = Mathf.Sin((float)phase) * env * vol;
             }
