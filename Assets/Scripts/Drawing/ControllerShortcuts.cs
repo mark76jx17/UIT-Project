@@ -176,34 +176,38 @@ namespace MixedRealityProject.Drawing
         {
             public readonly string Hand;   // ruolo: PaletteHandName / BrushHandName
             public readonly Btn Button;
-            public readonly string Action;
+            public readonly string Action; // chiave di localizzazione (vedi Localization)
             public ShortcutBinding(string hand, Btn button, string action)
             {
                 Hand = hand; Button = button; Action = action;
             }
         }
 
+        // Identificatori di ruolo (NON mostrati: servono solo per accoppiare le voci al
+        // controller giusto nel diagramma). Il testo visibile è localizzato altrove.
         public const string PaletteHandName = "Palette-hand controller";
         public const string BrushHandName = "Brush-hand controller";
 
+        // Action = chiave di localizzazione: il pannello "View Shortcuts" la traduce nella
+        // lingua corrente (vedi PaletteController.ActionFor).
         public static readonly ShortcutBinding[] All =
         {
             // Mano della palette
-            new(PaletteHandName, Btn.StickClick, "Tool"),
-            new(PaletteHandName, Btn.StickLeft,  "Brush −"),
-            new(PaletteHandName, Btn.StickRight, "Brush +"),
-            new(PaletteHandName, Btn.StickUp,    "Redo"),
-            new(PaletteHandName, Btn.StickDown,  "Undo"),
-            new(PaletteHandName, Btn.FaceB,      "Save"),
-            new(PaletteHandName, Btn.Menu,       "Options"), // ☰: fisicamente sul Touch sinistro
+            new(PaletteHandName, Btn.StickClick, "sc.tool"),
+            new(PaletteHandName, Btn.StickLeft,  "sc.brushPrev"),
+            new(PaletteHandName, Btn.StickRight, "sc.brushNext"),
+            new(PaletteHandName, Btn.StickUp,    "sc.redo"),
+            new(PaletteHandName, Btn.StickDown,  "sc.undo"),
+            new(PaletteHandName, Btn.FaceB,      "sc.save"),
+            new(PaletteHandName, Btn.Menu,       "options"), // ☰: fisicamente sul Touch sinistro
 
             // Mano del pennello
-            new(BrushHandName, Btn.StickClick, "Pressure"),
-            new(BrushHandName, Btn.StickUp,    "Grid"),
-            new(BrushHandName, Btn.StickDown,  "Mirror"),
-            new(BrushHandName, Btn.StickLeft,  "Snap"),
-            new(BrushHandName, Btn.StickRight, "Load"),
-            new(BrushHandName, Btn.FaceB,      "Delete all (hold)"),
+            new(BrushHandName, Btn.StickClick, "sc.pressure"),
+            new(BrushHandName, Btn.StickUp,    "sc.grid"),
+            new(BrushHandName, Btn.StickDown,  "sc.mirror"),
+            new(BrushHandName, Btn.StickLeft,  "sc.snap"),
+            new(BrushHandName, Btn.StickRight, "sc.load"),
+            new(BrushHandName, Btn.FaceB,      "sc.clearAll"),
         };
     }
 }

@@ -33,6 +33,7 @@ namespace MixedRealityProject.Drawing
                 case "clear": Trash(); break;
                 case "options": Ellipsis(); break;
                 case "close": Cross(); break;
+                case "chevron": Chevron(); break;
                 case "bolt": Bolt(); break;
                 case "hand-right": Hand(mirror: false); break;
                 case "hand-left": Hand(mirror: true); break;
@@ -141,6 +142,15 @@ namespace MixedRealityProject.Drawing
             const float r = 0.44f, th = 0.105f;
             Seg(new(-r, -r), new(r, r), th);
             Seg(new(-r, r), new(r, -r), th);
+        }
+
+        // Freccetta verso il basso (stato "chiuso" della dropdown lingua): due segmenti a
+        // "v" con estremità arrotondate, stesso stile SDF di Cross/Bolt.
+        static void Chevron()
+        {
+            const float th = 0.11f;
+            Seg(new(-0.45f, 0.18f), new(0f, -0.28f), th);
+            Seg(new(0f, -0.28f), new(0.45f, 0.18f), th);
         }
 
         // Saetta (menu "View Shortcuts"): poligono pieno a zig-zag, stesso stile SDF

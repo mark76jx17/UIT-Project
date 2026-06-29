@@ -103,6 +103,11 @@ namespace MixedRealityProject.Drawing
         bool optionsOpen;
         readonly List<System.Action> optionsSync = new();
 
+        // Cambio lingua: l'evento Localization.LanguageChanged alza questo flag e la
+        // ricostruzione avviene a inizio Update, MAI dentro il callback del bottone (che
+        // distruggerebbe il bottone della dropdown mentre è ancora in fase di pressione).
+        bool languageDirty;
+
         // Pannello "View Shortcuts" (sola lettura): elenca le scorciatoie da controller
         // (vedi ControllerShortcuts.All). Aperto dal bottone ⚡ nel menu Options; come
         // optionsPanel vive a parte e non viene distrutto dal Rebuild.
@@ -144,6 +149,7 @@ namespace MixedRealityProject.Drawing
             // Tutti i controlli appena creati vanno sul layer della palette (per il ray).
             SetLayerRecursively(gameObject, PaletteLayer);
             StrokeSettings.RecentColorsChanged += RefreshRecents;
+            Localization.LanguageChanged += OnLanguageChanged;
             RefreshRecents();
 #if UNITY_EDITOR
             if (pinPaletteInEditor)
@@ -151,7 +157,14 @@ namespace MixedRealityProject.Drawing
 #endif
         }
 
-        void OnDestroy() => StrokeSettings.RecentColorsChanged -= RefreshRecents;
+        void OnDestroy()
+        {
+            StrokeSettings.RecentColorsChanged -= RefreshRecents;
+            Localization.LanguageChanged -= OnLanguageChanged;
+        }
+
+        // Differisce la ricostruzione: vedi `languageDirty`.
+        void OnLanguageChanged() => languageDirty = true;
 
 #if UNITY_EDITOR
         void PlacePaletteForEditor()
@@ -174,6 +187,14 @@ namespace MixedRealityProject.Drawing
 
         void Update()
         {
+            // Cambio lingua richiesto da un bottone: ricostruisci ORA (inizio frame, fuori dal
+            // callback del bottone) tutta la UI testuale nella nuova lingua.
+            if (languageDirty)
+            {
+                languageDirty = false;
+                RebuildAll();
+            }
+
             // Trigger della mano palette (sinistra) = apri/chiudi manualmente.
             // La mano palette non disegna, quindi il suo trigger è libero.
             if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, StrokeSettings.PaletteHand))
@@ -351,7 +372,7 @@ namespace MixedRealityProject.Drawing
             bright.transform.SetParent(panel.transform, false);
             bright.transform.localPosition = new Vector3(brightCol.Center.x, elemY, brightCol.Center.z);
             bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, colH));
-            MakeLabel(panel.transform, "Brightness",
+            MakeLabel(panel.transform, Localization.Get("brightness"),
                 new Vector3(brightCol.Center.x, wheelCell.Center.y + wheelCell.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
                 new Vector2(brightCol.Size.x, brightLabelH), SliderLabelFont, TextAlignmentOptions.Center);
             layout.Gap(0.007f);
@@ -376,7 +397,7 @@ namespace MixedRealityProject.Drawing
             var alphaRow = layout.Row(0.024f);
             var alphaLabel = alphaRow.Left(0.055f);
             var alphaCell = alphaRow.Fill();
-            MakeLabel(panel.transform, "Opacity",
+            MakeLabel(panel.transform, Localization.Get("opacity"),
                 new Vector3(alphaLabel.Center.x, alphaLabel.Center.y, -0.006f),
                 alphaLabel.Size, SliderLabelFont, TextAlignmentOptions.Left);
             var alpha = new GameObject("AlphaSlider");
@@ -395,7 +416,7 @@ namespace MixedRealityProject.Drawing
 
             // ---------- BRUSH ----------
             var pressureRow = layout.Row(0.034f);
-            MakeToggleButton("Pressure", pressureRow.Fill(),
+            MakeToggleButton("pressure", pressureRow.Fill(),
                 () => StrokeSettings.SizeMode == SizeMode.PressureBrush,
                 () => StrokeSettings.SizeMode = StrokeSettings.SizeMode == SizeMode.PressureBrush
                     ? SizeMode.FixedPen : SizeMode.PressureBrush);
@@ -403,7 +424,7 @@ namespace MixedRealityProject.Drawing
             var sizeRow = layout.Row(0.024f);
             var sizeLabel = sizeRow.Left(0.055f);
             var sizeCell = sizeRow.Fill();
-            MakeLabel(panel.transform, "Size",
+            MakeLabel(panel.transform, Localization.Get("size"),
                 new Vector3(sizeLabel.Center.x, sizeLabel.Center.y, -0.006f),
                 sizeLabel.Size, SliderLabelFont, TextAlignmentOptions.Left);
             var size = new GameObject("SizeSlider");
@@ -424,15 +445,15 @@ namespace MixedRealityProject.Drawing
             var toggleRow = layout.Row(0.034f);
             var toggleCells = toggleRow.Split(3);
 
-            MakeToggleButton("Mirror", toggleCells[0],
+            MakeToggleButton("mirror", toggleCells[0],
                 () => Mirror.Enabled,
                 () => Mirror.Toggle(Head != null ? Head.transform : transform));
 
-            MakeToggleButton("Grid", toggleCells[1],
+            MakeToggleButton("grid", toggleCells[1],
                 () => ReferenceGrid.Enabled,
                 () => ReferenceGrid.Toggle(Head != null ? Head.transform : transform));
 
-            MakeToggleButton("Line", toggleCells[2],
+            MakeToggleButton("line", toggleCells[2],
                 () => StrokeSettings.SnapAxis,
                 () => StrokeSettings.SnapAxis = !StrokeSettings.SnapAxis);
 
@@ -452,13 +473,13 @@ namespace MixedRealityProject.Drawing
             var toolsRow = layout.Row(0.044f);
             var toolCells = toolsRow.Split(3);
 
-            penButton = MakeToolButton("Draw", "pencil", toolCells[0],
+            penButton = MakeToolButton("draw", "pencil", toolCells[0],
                 () => StrokeSettings.Tool = ToolMode.Pen);
 
-            fillButton = MakeToolButton("Fill", "droplet", toolCells[1],
+            fillButton = MakeToolButton("fill", "droplet", toolCells[1],
                 () => StrokeSettings.Tool = ToolMode.Fill);
 
-            eraserButton = MakeToolButton("Erase", "eraser", toolCells[2],
+            eraserButton = MakeToolButton("erase", "eraser", toolCells[2],
                 () => StrokeSettings.Tool = ToolMode.Eraser);
         }
 
@@ -474,6 +495,27 @@ namespace MixedRealityProject.Drawing
             lastType = -1;
             BuildPanel();
             PositionMenus(); // il lato della striscia azioni è cambiato: riancora i pop-up
+            SetLayerRecursively(gameObject, PaletteLayer);
+            RefreshRecents();
+        }
+
+        // Ricostruisce TUTTA la UI testuale: oltre al pannello principale anche i sotto-pannelli
+        // Options e Shortcuts (che hanno testo). Usato al cambio lingua. Gli stati di apertura
+        // (optionsOpen/shortcutsOpen) restano nei campi: AnimateVisibility li riattiva al frame
+        // successivo, quindi il menu eventualmente aperto si ripresenta nella nuova lingua.
+        public void RebuildAll()
+        {
+            if (panel != null) Destroy(panel);
+            if (optionsPanel != null) Destroy(optionsPanel);
+            if (shortcutsPanel != null) Destroy(shortcutsPanel);
+            toggleSync.Clear();
+            optionsSync.Clear(); // i sync di Options puntano a renderer ora distrutti
+            lastTool = (ToolMode)(-1);
+            lastType = -1;
+            BuildPanel();
+            BuildOptionsPanel();
+            BuildShortcutsPanel();
+            PositionMenus();
             SetLayerRecursively(gameObject, PaletteLayer);
             RefreshRecents();
         }
@@ -510,7 +552,7 @@ namespace MixedRealityProject.Drawing
         // è il punto d'estensione per le impostazioni future della palette.
         void BuildOptionsPanel()
         {
-            var size = new Vector2(0.26f, 0.225f);
+            var size = new Vector2(0.26f, 0.32f);
             optionsSize = size;
             // La posizione finale (accanto al bottone ellipsi, sul lato della mano) è data
             // da PositionMenus: qui basta crearlo, ci pensa lei ad ancorarlo.
@@ -522,7 +564,7 @@ namespace MixedRealityProject.Drawing
             float top = size.y * 0.5f;
 
             // Header: titolo a sinistra + linea separatrice accent sotto.
-            MakeLabel(optionsPanel.transform, "Options",
+            MakeLabel(optionsPanel.transform, Localization.Get("options"),
                 new Vector3(-0.006f, top - 0.026f, -0.004f),
                 new Vector2(size.x - 0.06f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
 
@@ -547,7 +589,7 @@ namespace MixedRealityProject.Drawing
             // evidenziato (accent); toccare un segmento applica subito quella modalità.
             var handCell = new Cell
             {
-                Center = new Vector3(0f, 0.022f, -0.004f),
+                Center = new Vector3(0f, 0.066f, -0.004f),
                 Size = new Vector2(size.x - 0.05f, 0.05f)
             };
             const float segGap = 0.006f;
@@ -591,7 +633,7 @@ namespace MixedRealityProject.Drawing
             // lettura; resta un modale sopra Options, chiudendolo si torna a Options.
             var scCell = new Cell
             {
-                Center = new Vector3(0f, -0.05f, -0.004f),
+                Center = new Vector3(0f, 0f, -0.004f),
                 Size = new Vector2(size.x - 0.05f, 0.05f)
             };
             var sc = MakeRoundedButton(optionsPanel.transform, "ViewShortcuts",
@@ -602,11 +644,74 @@ namespace MixedRealityProject.Drawing
             float scIcon = Mathf.Min(scCell.Size.y * 0.6f, 0.03f);
             float scIconX = -scCell.Size.x * 0.5f + scIcon * 0.5f + 0.012f;
             MakeIconImage(sc.transform, "bolt", new Vector3(scIconX, 0f, -0.005f), scIcon);
-            MakeLabel(sc.transform, "View Shortcuts", new Vector3(0f, 0f, -0.004f),
+            MakeLabel(sc.transform, Localization.Get("viewShortcuts"), new Vector3(0f, 0f, -0.004f),
                 scCell.Size, ToggleFont, TextAlignmentOptions.Center);
+
+            // Voce: lingua della UI come dropdown (etichetta a sinistra + selettore a destra).
+            // Il selettore si popola da Localization.Languages e mostra la lingua corrente da
+            // chiuso: aggiungere una lingua la fa comparire qui dentro senza altre modifiche.
+            const float langRowY = -0.066f;
+            float langRowW = size.x - 0.05f;
+            MakeLabel(optionsPanel.transform, Localization.Get("language"),
+                new Vector3(-langRowW * 0.5f + 0.005f, langRowY, -0.004f),
+                new Vector2(0.09f, 0.03f), SliderLabelFont, TextAlignmentOptions.Left);
+            var ddSize = new Vector2(langRowW * 0.56f, 0.044f);
+            var ddCenter = new Vector3(langRowW * 0.5f - ddSize.x * 0.5f, langRowY, -0.004f);
+            BuildLanguageDropdown(optionsPanel.transform, ddCenter, ddSize);
 
             SetLayerRecursively(optionsPanel, PaletteLayer);
             optionsPanel.SetActive(false);
+        }
+
+        // Dropdown lingua: header (stato CHIUSO) con la lingua corrente + freccetta; toccandolo
+        // si apre/chiude una lista a comparsa con UNA voce per ogni lingua di
+        // Localization.Languages. Tutto deriva da quella lista: aggiungere una lingua in
+        // Localization la fa apparire qui senza modificare questo metodo. Scegliere una voce
+        // imposta Localization.Current → l'evento ricostruisce la UI nella nuova lingua
+        // (RebuildAll, differito di un frame così non si distrugge il bottone mentre è premuto).
+        void BuildLanguageDropdown(Transform parent, Vector3 center, Vector2 size)
+        {
+            // Container della lista a comparsa: figlio del menu modale (così le voci sono
+            // interagibili, IsChildOf(ModalRoot)) e parte chiuso (solo l'header è visibile).
+            var list = new GameObject("LangList");
+            list.transform.SetParent(parent, false);
+
+            // Header (stato chiuso): lingua corrente + freccetta. Tocco = apre/chiude la lista.
+            var header = MakeRoundedButton(parent, "LangDropdown", center, size,
+                Mathf.Min(0.012f, size.y * 0.4f), ButtonColor,
+                () => list.SetActive(!list.activeSelf));
+            float chev = Mathf.Min(size.y * 0.5f, 0.018f);
+            MakeIconImage(header.transform,
+                "chevron", new Vector3(size.x * 0.5f - chev * 0.6f - 0.008f, 0f, -0.005f), chev);
+            MakeLabel(header.transform, Localization.LanguageName(Localization.Current),
+                new Vector3(-0.004f, 0f, -0.004f),
+                new Vector2(size.x - chev - 0.02f, size.y), SliderLabelFont, TextAlignmentOptions.Center);
+
+            // Lista: una voce per lingua, sotto l'header, su sfondo opaco DAVANTI al pannello.
+            var langs = Localization.Languages;
+            const float itemH = 0.034f, itemGap = 0.004f;
+            float listH = langs.Count * itemH + (langs.Count - 1) * itemGap + 0.012f;
+            float listTopY = center.y - size.y * 0.5f - 0.004f; // appena sotto l'header
+            var listCenter = new Vector3(center.x, listTopY - listH * 0.5f, -0.014f);
+            MakeRounded(list.transform, "LangListBg", listCenter,
+                new Vector2(size.x, listH), 0.012f, PanelColor, QueuePanel);
+
+            float iy0 = listCenter.y + listH * 0.5f - 0.006f - itemH * 0.5f;
+            for (int i = 0; i < langs.Count; i++)
+            {
+                string code = langs[i]; // catturato per la lambda della voce
+                bool isCurrent = code == Localization.Current;
+                float iy = iy0 - i * (itemH + itemGap);
+                var item = MakeRoundedButton(list.transform, "Lang_" + code,
+                    new Vector3(center.x, iy, -0.016f), new Vector2(size.x - 0.012f, itemH),
+                    Mathf.Min(0.010f, itemH * 0.4f), isCurrent ? AccentColor : ButtonColor,
+                    () => Localization.Current = code); // l'evento ricostruisce la UI (e richiude)
+                MakeLabel(item.transform, Localization.LanguageName(code),
+                    new Vector3(0f, 0f, -0.004f), new Vector2(size.x - 0.02f, itemH),
+                    SliderLabelFont, TextAlignmentOptions.Center);
+            }
+
+            list.SetActive(false); // chiuso all'avvio: si vede solo l'header con la lingua attiva
         }
 
         // Toggle unico del menu (☰ del controller sinistro e bottone "..." nella palette):
@@ -688,7 +793,7 @@ namespace MixedRealityProject.Drawing
             // Header: icona saetta + titolo, linea accent, X di chiusura.
             MakeIconImage(shortcutsPanel.transform, "bolt",
                 new Vector3(-size.x * 0.5f + 0.03f, top - 0.03f, -0.005f), 0.028f);
-            MakeLabel(shortcutsPanel.transform, "Shortcuts",
+            MakeLabel(shortcutsPanel.transform, Localization.Get("shortcuts"),
                 new Vector3(-size.x * 0.5f + 0.26f, top - 0.03f, -0.004f),
                 new Vector2(0.32f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
             MakeRounded(shortcutsPanel.transform, "HeaderSep",
@@ -713,7 +818,7 @@ namespace MixedRealityProject.Drawing
 
             BuildSchematicDiagram(leftRole, rightRole, top);
 
-            MakeLabel(shortcutsPanel.transform, "Works with the palette closed.",
+            MakeLabel(shortcutsPanel.transform, Localization.Get("shortcuts.hint"),
                 new Vector3(0f, -top + 0.016f, -0.004f),
                 new Vector2(size.x - 0.04f, 0.02f), SliderLabelFont * 0.78f, TextAlignmentOptions.Center);
 
@@ -731,12 +836,13 @@ namespace MixedRealityProject.Drawing
 
         static readonly Color LeaderColor = new(0.62f, 0.56f, 0.92f, 1f); // linea-guida (accent tenue)
 
-        // Cerca l'azione di un tasto per un ruolo nella tabella unica.
+        // Cerca l'azione di un tasto per un ruolo nella tabella unica e la traduce: il campo
+        // Action di ControllerShortcuts.All è una chiave di localizzazione (vedi quella classe).
         static string ActionFor(string role, ControllerShortcuts.Btn b)
         {
             foreach (var x in ControllerShortcuts.All)
                 if (x.Hand == role && x.Button == b)
-                    return x.Action;
+                    return Localization.Get(x.Action);
             return null;
         }
 
@@ -801,10 +907,10 @@ namespace MixedRealityProject.Drawing
             string lf = ActionFor(role, ControllerShortcuts.Btn.StickLeft);
             string rt = ActionFor(role, ControllerShortcuts.Btn.StickRight);
             string text =
-                $"<b><color=#{acc}>Thumbstick</color></b>\n" +
-                $"<color={dim}>Click</color> {click}\n" +
-                $"<color={dim}>Up</color> {up}\n<color={dim}>Down</color> {down}\n" +
-                $"<color={dim}>Left</color> {lf}\n<color={dim}>Right</color> {rt}";
+                $"<b><color=#{acc}>{Localization.Get("stick")}</color></b>\n" +
+                $"<color={dim}>{Localization.Get("stick.click")}</color> {click}\n" +
+                $"<color={dim}>{Localization.Get("dir.up")}</color> {up}\n<color={dim}>{Localization.Get("dir.down")}</color> {down}\n" +
+                $"<color={dim}>{Localization.Get("dir.left")}</color> {lf}\n<color={dim}>{Localization.Get("dir.right")}</color> {rt}";
             const float w = 0.15f;
             var align = toRight ? TextAlignmentOptions.Left : TextAlignmentOptions.Right;
             float cx = toRight ? edgeX + w * 0.5f : edgeX - w * 0.5f;
@@ -901,28 +1007,30 @@ namespace MixedRealityProject.Drawing
             }
         }
 
-        // Etichetta leggibile del tipo di pennello (Round → "stroke").
-        static string BrushLabel(BrushType type) => type switch
+        // Etichetta localizzata del tipo di pennello (Round → "stroke"/"tratto").
+        static string BrushLabel(BrushType type) => Localization.Get(type switch
         {
-            BrushType.Round => "stroke",
-            BrushType.Ribbon => "ribbon",
-            BrushType.Dashed => "dashed",
-            BrushType.Glow => "glow",
-            _ => type.ToString().ToLower()
-        };
+            BrushType.Round => "brush.stroke",
+            BrushType.Ribbon => "brush.ribbon",
+            BrushType.Dashed => "brush.dashed",
+            BrushType.Glow => "brush.glow",
+            _ => "brush.stroke"
+        });
 
         // Striscia verticale Redo/Undo/Save/Load/Delete all, ancorata a destra del pannello.
         // Stessa dimensione dei bottoni pennello a sinistra: label piccola sopra + icona sotto.
         void BuildActionStrip(Vector2 panelSize)
         {
-            var actions = new (string name, string label, System.Action action)[]
+            // labelKey: chiave di localizzazione (risolta in MakeLabel più sotto). Il campo
+            // name resta l'identificatore stabile dell'icona/GameObject.
+            var actions = new (string name, string labelKey, System.Action action)[]
             {
-                ("redo",  "undo",       StrokeHistory.Redo),
-                ("undo",  "redo",       StrokeHistory.Undo),
-                ("save",  "save",       DrawingStore.Save),
-                ("load",  "load",       DrawingStore.Load),
-                ("clear", "delete all", DrawingStore.NewScene),
-                ("options", "Options",  ToggleOptionsPanel), // apre il menu impostazioni
+                ("redo",  "action.undo",     StrokeHistory.Redo),
+                ("undo",  "action.redo",     StrokeHistory.Undo),
+                ("save",  "action.save",     DrawingStore.Save),
+                ("load",  "action.load",     DrawingStore.Load),
+                ("clear", "action.clearAll", DrawingStore.NewScene),
+                ("options", "options",       ToggleOptionsPanel), // apre il menu impostazioni
             };
 
             const float bSize = 0.058f, bGap = 0.012f;
@@ -965,7 +1073,7 @@ namespace MixedRealityProject.Drawing
                 }
 
                 // Label piccola in alto, come nella striscia pennelli a sinistra.
-                MakeLabel(b.transform, actions[i].label,
+                MakeLabel(b.transform, Localization.Get(actions[i].labelKey),
                     new Vector3(0f, bSize * 0.30f, -0.004f),
                     new Vector2(bSize * 0.92f, bSize * 0.30f),
                     ActionLabelFont,
@@ -978,15 +1086,17 @@ namespace MixedRealityProject.Drawing
             }
         }
 
-        Renderer MakeToolButton(string label, string iconName, Cell cell, System.Action action)
+        // labelKey: chiave di localizzazione; resta il nome (stabile) del GameObject, mentre
+        // il testo mostrato è la traduzione nella lingua corrente.
+        Renderer MakeToolButton(string labelKey, string iconName, Cell cell, System.Action action)
         {
-            var b = MakeRoundedButton(panel.transform, label, cell.Center, cell.Size,
+            var b = MakeRoundedButton(panel.transform, labelKey, cell.Center, cell.Size,
                 Mathf.Min(0.008f, cell.Size.y * 0.3f), ButtonColor, action);
 
             // Scritta piccola in alto a sinistra
             MakeLabel(
                 b.transform,
-                label,
+                Localization.Get(labelKey),
                 new Vector3(-cell.Size.x * 0.05f, cell.Size.y * 0.30f, -0.004f),
                 new Vector2(cell.Size.x * 0.70f, cell.Size.y * 0.25f),
                 ToolSmallLabelFont,
@@ -1029,17 +1139,19 @@ namespace MixedRealityProject.Drawing
         // Toggle compatto: bottone che si illumina (accent) quando attivo. Niente pillola.
         // I toggle del pannello principale usano panel.transform + toggleSync (svuotato dal
         // Rebuild); il sotto-pannello Options passa il proprio parent e la propria lista.
-        void MakeToggleButton(string label, Cell cell, System.Func<bool> isOn, System.Action onToggle)
-            => MakeToggleButton(label, cell, isOn, onToggle, panel.transform, toggleSync);
+        void MakeToggleButton(string labelKey, Cell cell, System.Func<bool> isOn, System.Action onToggle)
+            => MakeToggleButton(labelKey, cell, isOn, onToggle, panel.transform, toggleSync);
 
-        void MakeToggleButton(string label, Cell cell, System.Func<bool> isOn, System.Action onToggle,
+        // labelKey: chiave di localizzazione; resta nel nome del GameObject, il testo mostrato
+        // è la traduzione.
+        void MakeToggleButton(string labelKey, Cell cell, System.Func<bool> isOn, System.Action onToggle,
             Transform parent, List<System.Action> sync)
         {
-            var b = MakeRoundedButton(parent, label + "Toggle", cell.Center, cell.Size,
+            var b = MakeRoundedButton(parent, labelKey + "Toggle", cell.Center, cell.Size,
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
             // È un toggle: il feedback userà il suono on/off in base al nuovo stato.
             b.GetComponent<PaletteButton>().ToggleState = isOn;
-            MakeLabel(b.transform, label, new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center);
+            MakeLabel(b.transform, Localization.Get(labelKey), new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center);
             var r = b.GetComponent<Renderer>();
             // Aggiorna il colore solo quando lo stato del toggle cambia davvero.
             bool initialized = false;

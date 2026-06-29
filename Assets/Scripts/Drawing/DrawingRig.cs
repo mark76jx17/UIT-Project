@@ -34,6 +34,7 @@ namespace MixedRealityProject.Drawing
 
             StrokeSettings.LoadLeftHanded(leftHanded); // ripristina la mano dominante salvata
             StrokeSettings.LoadRecentColors(); // ripristina i 5 colori recenti salvati
+            Localization.Load(); // ripristina la lingua scelta per la UI
 
             // Su Mac/editor senza runtime XR il rig può venire disattivato dal
             // Meta SDK: in quel caso si ripiega sulla camera principale
