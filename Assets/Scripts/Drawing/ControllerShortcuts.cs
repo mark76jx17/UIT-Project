@@ -141,8 +141,8 @@ namespace MixedRealityProject.Drawing
 
         void CycleTool()
         {
-            StrokeSettings.Tool = (ToolMode)(((int)StrokeSettings.Tool + 1) % 3);
-            Toast.Show("Tool: " + StrokeSettings.Tool); // Pen / Fill / Eraser
+            StrokeSettings.Tool = (ToolMode)(((int)StrokeSettings.Tool + 1) % 4);
+            Toast.Show("Tool: " + StrokeSettings.Tool); // Pen / Fill / Eraser / Delete
         }
 
         void CycleType(int dir)

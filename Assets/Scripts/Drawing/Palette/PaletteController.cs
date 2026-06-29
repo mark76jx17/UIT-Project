@@ -78,7 +78,7 @@ namespace MixedRealityProject.Drawing
         const float ToggleFont = ButtonFont; // Pressure/Mirror/Grid/Snap uguali a Draw/Fill/Erase
         const float SliderLabelFont = 0.13f; // label degli slider: piccola ma leggibile
 
-        const float ToolSmallLabelFont = 0.13f;
+        const float ToolSmallLabelFont = 0.15f;
 
         // Icone nei bottoni testuali (Draw/Fill/Erase, Undo/Redo/Save/Load): disattivate
         // su richiesta — solo label testuale. Il codice icone (ToolIcon/MakeIconImage)
@@ -89,7 +89,7 @@ namespace MixedRealityProject.Drawing
         static readonly BrushType[] BrushOrder = { BrushType.Round, BrushType.Ribbon, BrushType.Glow, BrushType.Dashed };
 
         GameObject panel;
-        Renderer penButton, fillButton, eraserButton;
+        Renderer penButton, fillButton, eraserButton, deleteButton;
         Renderer[] brushButtons;
         Material[] brushPreviewMats; // anteprime tratto: la selezionata si tinge col colore corrente
         Renderer[] recentSwatches;
@@ -274,6 +274,8 @@ namespace MixedRealityProject.Drawing
                 penButton.material.SetColor(BaseColorId, lastTool == ToolMode.Pen ? AccentColor : ButtonColor);
                 fillButton.material.SetColor(BaseColorId, lastTool == ToolMode.Fill ? AccentColor : ButtonColor);
                 eraserButton.material.SetColor(BaseColorId, lastTool == ToolMode.Eraser ? AccentColor : ButtonColor);
+                if (deleteButton != null)
+                    deleteButton.material.SetColor(BaseColorId, lastTool == ToolMode.Delete ? AccentColor : ButtonColor);
             }
             if ((int)StrokeSettings.Type != lastType)
             {
@@ -473,14 +475,29 @@ namespace MixedRealityProject.Drawing
             var toolsRow = layout.Row(0.044f);
             var toolCells = toolsRow.Split(3);
 
-            penButton = MakeToolButton("draw", "pencil", toolCells[0],
+            // Draw: stessa posizione, ma più stretto.
+            Cell drawCell = toolCells[0];
+            drawCell.Size = new Vector2(drawCell.Size.x * 0.85f, drawCell.Size.y);
+
+            // Fill: più stretto e più vicino a Draw.
+            Cell fillCell = toolCells[1];
+            fillCell.Size = new Vector2(fillCell.Size.x * 0.85f, fillCell.Size.y);
+            fillCell.Center += new Vector3(-0.012f, 0f, 0f);
+
+            // Erase/Delete: più largo e spostato a sinistra.
+            // Così i due mini-tasti diventano più rettangolari, ma restano dentro il pannello.
+            Cell eraseDeleteCell = toolCells[2];
+            eraseDeleteCell.Size = new Vector2(eraseDeleteCell.Size.x + 0.018f, eraseDeleteCell.Size.y);
+            eraseDeleteCell.Center += new Vector3(-0.009f, 0f, 0f);
+
+            penButton = MakeToolButton("draw", "pencil", drawCell,
                 () => StrokeSettings.Tool = ToolMode.Pen);
 
-            fillButton = MakeToolButton("fill", "droplet", toolCells[1],
+            fillButton = MakeToolButton("fill", "droplet", fillCell,
                 () => StrokeSettings.Tool = ToolMode.Fill);
 
-            eraserButton = MakeToolButton("erase", "eraser", toolCells[2],
-                () => StrokeSettings.Tool = ToolMode.Eraser);
+            BuildEraseDeleteButtons(eraseDeleteCell);
+
         }
 
         // Ricostruisce il pannello principale (es. dopo il toggle "Left-Handed Mode": le
@@ -1113,6 +1130,82 @@ namespace MixedRealityProject.Drawing
             );
 
             return b.GetComponent<Renderer>();
+        }
+
+        void BuildEraseDeleteButtons(Cell cell) 
+        {
+            const float gap = 0.002f;
+
+            float totalW = cell.Size.x;
+            float h = cell.Size.y;
+
+            float buttonW = (totalW - gap) * 0.5f;
+            float buttonH = h;
+
+            float leftX = cell.Center.x - (buttonW + gap) * 0.5f;
+            float rightX = cell.Center.x + (buttonW + gap) * 0.5f;
+
+            float corner = Mathf.Min(0.008f, buttonH * 0.25f);
+
+            // -------- Erase --------
+            var erase = MakeRoundedButton(
+                panel.transform,
+                "EraseButton",
+                new Vector3(leftX, cell.Center.y, cell.Center.z),
+                new Vector2(buttonW, buttonH),
+                corner,
+                ButtonColor,
+                () => StrokeSettings.Tool = ToolMode.Eraser
+            );
+
+            eraserButton = erase.GetComponent<Renderer>();
+
+            MakeLabel(
+                erase.transform,
+                Localization.Get("erase"),
+                new Vector3(buttonW * 0.04f, buttonH * 0.28f, -0.004f),
+                new Vector2(buttonW * 0.86f, buttonH * 0.26f),
+                ToolSmallLabelFont * 0.81f,
+                TextAlignmentOptions.TopLeft,
+                autoFit: true
+            );
+
+            MakeIconImage(
+                erase.transform,
+                "eraser",
+                new Vector3(0f, -buttonH * 0.09f, -0.005f),
+                Mathf.Min(buttonW, buttonH) * 0.46f
+            );
+
+            // -------- Delete --------
+            var delete = MakeRoundedButton(
+                panel.transform,
+                "DeleteButton",
+                new Vector3(rightX, cell.Center.y, cell.Center.z),
+                new Vector2(buttonW, buttonH),
+                corner,
+                ButtonColor,
+                () => StrokeSettings.Tool = ToolMode.Delete
+            );
+
+            deleteButton = delete.GetComponent<Renderer>();
+
+            MakeLabel(
+                delete.transform,
+                Localization.Get("delete"),
+                new Vector3(buttonW * 0.04f, buttonH * 0.28f, -0.004f),
+                new Vector2(buttonW * 0.86f, buttonH * 0.26f),
+                ToolSmallLabelFont * 0.81f,
+                TextAlignmentOptions.TopLeft,
+                autoFit: true
+            );
+
+            MakeIconImage(
+                delete.transform,
+                "close",
+                new Vector3(0f, -buttonH * 0.09f, -0.005f),
+                Mathf.Min(buttonW, buttonH) * 0.43f
+            );
         }
 
         // Pulsante con icona a sinistra + testo a destra, senza sovrapposizioni

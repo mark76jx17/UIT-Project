@@ -43,6 +43,7 @@ namespace MixedRealityProject.Drawing
                 ["draw"]             = "Draw",
                 ["fill"]             = "Fill",
                 ["erase"]            = "Erase",
+                ["delete"]      = "Delete",
                 // -- palette: tipi di pennello --
                 ["brush.stroke"]     = "stroke",
                 ["brush.ribbon"]     = "ribbon",
@@ -93,6 +94,7 @@ namespace MixedRealityProject.Drawing
                 ["draw"]             = "Disegna",
                 ["fill"]             = "Riempi",
                 ["erase"]            = "Cancella",
+                ["delete"]           = "Elimina",
                 ["brush.stroke"]     = "tratto",
                 ["brush.ribbon"]     = "nastro",
                 ["brush.dashed"]     = "trattegg.",

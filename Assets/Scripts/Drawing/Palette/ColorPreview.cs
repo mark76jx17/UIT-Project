@@ -17,14 +17,25 @@ namespace MixedRealityProject.Drawing
         Transform swatch;
         Material swatchMat;
         float minSize, maxSize;
+        Transform border;
+        float borderPadding;
 
         public void Build(Vector2 box)
         {
-            // Rettangolo del colore (trasparente, così l'alpha lascia vedere lo sfondo
-            // del pannello): mesh unitaria scalata ogni frame in base alla dimensione del pennello.
+            // Bordo esterno: resta visibile anche quando il colore scelto è nero.
+            // Uso lo stesso lilla/accent della palette selezionata.
+            var bd = new GameObject("SwatchBorder");
+            bd.transform.SetParent(transform, false);
+            bd.transform.localPosition = new Vector3(0f, 0f, -0.0045f);
+            bd.AddComponent<MeshFilter>().mesh = RoundedMesh.Rect(1f, 1f, 0.25f);
+            bd.AddComponent<MeshRenderer>().material =
+                BrushMaterials.CreateUnlit(new Color(0.55f, 0.45f, 0.95f, 1f), opaque: true);
+            border = bd.transform;
+
+            // Rettangolo del colore: leggermente più piccolo del bordo.
             var sw = new GameObject("Swatch");
             sw.transform.SetParent(transform, false);
-            sw.transform.localPosition = new Vector3(0f, 0f, -0.004f);
+            sw.transform.localPosition = new Vector3(0f, 0f, -0.005f);
             sw.AddComponent<MeshFilter>().mesh = RoundedMesh.Rect(1f, 1f, 0.25f);
             swatchMat = BrushMaterials.CreateUnlit(Color.white);
             sw.AddComponent<MeshRenderer>().material = swatchMat;
@@ -32,6 +43,7 @@ namespace MixedRealityProject.Drawing
 
             maxSize = Mathf.Min(box.x, box.y) * 0.88f;
             minSize = maxSize * 0.22f;
+            borderPadding = maxSize * 0.08f;
 
             Apply(); // stato iniziale (utile anche in edit mode, dove Update non gira)
         }
@@ -40,10 +52,14 @@ namespace MixedRealityProject.Drawing
 
         void Apply()
         {
-            if (swatchMat == null)
+            if (swatchMat == null || swatch == null || border == null)
                 return;
-            swatchMat.SetColor(BaseColorId, StrokeSettings.Color); // colore + alpha correnti
+
+            swatchMat.SetColor(BaseColorId, StrokeSettings.Color);
+
             float s = Mathf.Lerp(minSize, maxSize, StrokeSettings.Size01);
+
+            border.localScale = new Vector3(s + borderPadding, s + borderPadding, 1f);
             swatch.localScale = new Vector3(s, s, 1f);
         }
     }

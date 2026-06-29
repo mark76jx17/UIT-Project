@@ -262,6 +262,20 @@ namespace MixedRealityProject.Drawing
                 fillHover = null;
             }
 
+            if (StrokeSettings.DeleteMode)
+            {
+                // Delete: cancella l'intero oggetto toccato, non solo una porzione.
+                if (pressed)
+                    EndPress(position);
+
+                UpdateEraseHover(position);
+
+                if (trigger >= pressThreshold)
+                    DeleteAt(position);
+
+                return;
+            }
+
             if (StrokeSettings.EraserMode)
             {
                 // Cambio modalità a metà tratto: chiudi il tratto in corso.
@@ -327,8 +341,10 @@ namespace MixedRealityProject.Drawing
             if (tool != lastIconTool)
             {
                 lastIconTool = tool;
-                string icon = tool == ToolMode.Eraser ? "eraser"
-                            : tool == ToolMode.Fill ? "droplet" : "pencil";
+                string icon = tool == ToolMode.Delete ? "close"
+                            : tool == ToolMode.Eraser ? "eraser"
+                            : tool == ToolMode.Fill ? "droplet"
+                            : "pencil";
                 cursorIconMat.SetTexture(BaseMapId, ToolIcon.Get(icon));
             }
             bool show = !IsDrawing;
@@ -497,6 +513,22 @@ namespace MixedRealityProject.Drawing
             current = null;
             mirrored = null;
             mergeTarget = null;
+        }
+
+        void DeleteAt(Vector3 position)
+        {
+            if (!FindNearbyItem(position, out var target, out _))
+                return;
+
+            StrokeHighlight.Clear(target);
+
+            if (eraseHover == target)
+                eraseHover = null;
+
+            target.gameObject.SetActive(false);
+            StrokeHistory.PushErase(target.gameObject);
+
+            HapticPulse(hapticStrokeDuration, frequency: 0.5f, amplitude: 0.6f);
         }
 
         void EraseAt(Vector3 position)

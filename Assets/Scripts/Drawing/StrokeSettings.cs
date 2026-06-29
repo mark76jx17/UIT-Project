@@ -15,7 +15,8 @@ namespace MixedRealityProject.Drawing
     {
         Pen,    // disegna tratti
         Fill,   // disegna un contorno che si chiude e si riempie
-        Eraser, // cancella l'oggetto toccato
+        Eraser,  // gomma: cancella/parzializza il tratto toccato
+        Delete,  // X: cancella l'intero oggetto toccato
     }
 
     public enum SizeMode
@@ -44,6 +45,8 @@ namespace MixedRealityProject.Drawing
 
         public static bool EraserMode => Tool == ToolMode.Eraser;
         public static bool FillMode => Tool == ToolMode.Fill;
+
+        public static bool DeleteMode => Tool == ToolMode.Delete;
 
         /// <summary>Tipo di pennello corrente (vedi la riga pennelli della palette).</summary>
         public static BrushType Type = BrushType.Round;
