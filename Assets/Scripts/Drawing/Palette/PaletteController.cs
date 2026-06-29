@@ -374,7 +374,7 @@ namespace MixedRealityProject.Drawing
             bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, colH));
             MakeLabel(panel.transform, Localization.Get("brightness"),
                 new Vector3(brightCol.Center.x, wheelCell.Center.y + wheelCell.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
-                new Vector2(brightCol.Size.x, brightLabelH), SliderLabelFont, TextAlignmentOptions.Center);
+                new Vector2(brightCol.Size.x, brightLabelH), SliderLabelFont, TextAlignmentOptions.Center, autoFit: true);
             layout.Gap(0.007f);
 
             var recentRow = layout.Row(0.030f);
@@ -399,7 +399,7 @@ namespace MixedRealityProject.Drawing
             var alphaCell = alphaRow.Fill();
             MakeLabel(panel.transform, Localization.Get("opacity"),
                 new Vector3(alphaLabel.Center.x, alphaLabel.Center.y, -0.006f),
-                alphaLabel.Size, SliderLabelFont, TextAlignmentOptions.Left);
+                alphaLabel.Size, SliderLabelFont, TextAlignmentOptions.Left, autoFit: true);
             var alpha = new GameObject("AlphaSlider");
             alpha.transform.SetParent(panel.transform, false);
             alpha.transform.localPosition = alphaCell.Center;
@@ -426,7 +426,7 @@ namespace MixedRealityProject.Drawing
             var sizeCell = sizeRow.Fill();
             MakeLabel(panel.transform, Localization.Get("size"),
                 new Vector3(sizeLabel.Center.x, sizeLabel.Center.y, -0.006f),
-                sizeLabel.Size, SliderLabelFont, TextAlignmentOptions.Left);
+                sizeLabel.Size, SliderLabelFont, TextAlignmentOptions.Left, autoFit: true);
             var size = new GameObject("SizeSlider");
             size.transform.SetParent(panel.transform, false);
             size.transform.localPosition = sizeCell.Center;
@@ -645,7 +645,7 @@ namespace MixedRealityProject.Drawing
             float scIconX = -scCell.Size.x * 0.5f + scIcon * 0.5f + 0.012f;
             MakeIconImage(sc.transform, "bolt", new Vector3(scIconX, 0f, -0.005f), scIcon);
             MakeLabel(sc.transform, Localization.Get("viewShortcuts"), new Vector3(0f, 0f, -0.004f),
-                scCell.Size, ToggleFont, TextAlignmentOptions.Center);
+                scCell.Size, ToggleFont, TextAlignmentOptions.Center, autoFit: true);
 
             // Voce: lingua della UI come dropdown (etichetta a sinistra + selettore a destra).
             // Il selettore si popola da Localization.Languages e mostra la lingua corrente da
@@ -654,7 +654,7 @@ namespace MixedRealityProject.Drawing
             float langRowW = size.x - 0.05f;
             MakeLabel(optionsPanel.transform, Localization.Get("language"),
                 new Vector3(-langRowW * 0.5f + 0.005f, langRowY, -0.004f),
-                new Vector2(0.09f, 0.03f), SliderLabelFont, TextAlignmentOptions.Left);
+                new Vector2(0.09f, 0.03f), SliderLabelFont, TextAlignmentOptions.Left, autoFit: true);
             var ddSize = new Vector2(langRowW * 0.56f, 0.044f);
             var ddCenter = new Vector3(langRowW * 0.5f - ddSize.x * 0.5f, langRowY, -0.004f);
             BuildLanguageDropdown(optionsPanel.transform, ddCenter, ddSize);
@@ -685,7 +685,7 @@ namespace MixedRealityProject.Drawing
                 "chevron", new Vector3(size.x * 0.5f - chev * 0.6f - 0.008f, 0f, -0.005f), chev);
             MakeLabel(header.transform, Localization.LanguageName(Localization.Current),
                 new Vector3(-0.004f, 0f, -0.004f),
-                new Vector2(size.x - chev - 0.02f, size.y), SliderLabelFont, TextAlignmentOptions.Center);
+                new Vector2(size.x - chev - 0.02f, size.y), SliderLabelFont, TextAlignmentOptions.Center, autoFit: true);
 
             // Lista: una voce per lingua, sotto l'header, su sfondo opaco DAVANTI al pannello.
             var langs = Localization.Languages;
@@ -708,7 +708,7 @@ namespace MixedRealityProject.Drawing
                     () => Localization.Current = code); // l'evento ricostruisce la UI (e richiude)
                 MakeLabel(item.transform, Localization.LanguageName(code),
                     new Vector3(0f, 0f, -0.004f), new Vector2(size.x - 0.02f, itemH),
-                    SliderLabelFont, TextAlignmentOptions.Center);
+                    SliderLabelFont, TextAlignmentOptions.Center, autoFit: true);
             }
 
             list.SetActive(false); // chiuso all'avvio: si vede solo l'header con la lingua attiva
@@ -995,7 +995,7 @@ namespace MixedRealityProject.Drawing
                     new Vector2(bSize, bSize), 0.013f, ButtonColor, () => StrokeSettings.Type = type);
                 // Label in alto, dentro il bottone.
                 MakeLabel(b.transform, BrushLabel(type), new Vector3(0f, bSize * 0.30f, -0.004f),
-                    new Vector2(bSize * 0.92f, bSize * 0.30f), BrushLabelFont, TextAlignmentOptions.Center);
+                    new Vector2(bSize * 0.92f, bSize * 0.30f), BrushLabelFont, TextAlignmentOptions.Center, autoFit: true);
                 // Icona (anteprima del tratto) sotto la label.
                 brushPreviewMats[i] = MakeTexQuad(b.transform, BrushPreview.Get(type),
                     new Vector3(0f, -bSize * 0.13f, -0.004f), new Vector2(bSize * 0.78f, bSize * 0.40f));
@@ -1077,7 +1077,7 @@ namespace MixedRealityProject.Drawing
                     new Vector3(0f, bSize * 0.30f, -0.004f),
                     new Vector2(bSize * 0.92f, bSize * 0.30f),
                     ActionLabelFont,
-                    TextAlignmentOptions.Center);
+                    TextAlignmentOptions.Center, autoFit: true);
 
                 // Icona sotto la label.
                 MakeIconImage(b.transform, actions[i].name,
@@ -1100,7 +1100,8 @@ namespace MixedRealityProject.Drawing
                 new Vector3(-cell.Size.x * 0.05f, cell.Size.y * 0.30f, -0.004f),
                 new Vector2(cell.Size.x * 0.70f, cell.Size.y * 0.25f),
                 ToolSmallLabelFont,
-                TextAlignmentOptions.TopLeft
+                TextAlignmentOptions.TopLeft,
+                autoFit: true
             );
 
             // Icona grande al centro
@@ -1151,7 +1152,7 @@ namespace MixedRealityProject.Drawing
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
             // È un toggle: il feedback userà il suono on/off in base al nuovo stato.
             b.GetComponent<PaletteButton>().ToggleState = isOn;
-            MakeLabel(b.transform, Localization.Get(labelKey), new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center);
+            MakeLabel(b.transform, Localization.Get(labelKey), new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center, autoFit: true);
             var r = b.GetComponent<Renderer>();
             // Aggiorna il colore solo quando lo stato del toggle cambia davvero.
             bool initialized = false;
@@ -1228,9 +1229,10 @@ namespace MixedRealityProject.Drawing
             col.size = new Vector3(size.x, size.y, 0.006f);
         }
 
-        // Etichetta TextMeshPro a dimensione fissa (niente auto-size che gonfia il testo).
-        // Restituisce il TMP così i chiamanti che lo desiderano possono aggiornare il testo.
-        TextMeshPro MakeLabel(Transform parent, string text, Vector3 localPos, Vector2 box, float fontSize, TextAlignmentOptions align)
+        // Etichetta TextMeshPro. Restituisce il TMP così i chiamanti che lo desiderano possono
+        // aggiornare il testo. autoFit=true: rimpicciolisce SOLO se serve (cap = fontSize), così
+        // le traduzioni più lunghe stanno nel bottone senza sbordare; l'inglese resta com'era.
+        TextMeshPro MakeLabel(Transform parent, string text, Vector3 localPos, Vector2 box, float fontSize, TextAlignmentOptions align, bool autoFit = false)
         {
             var go = new GameObject("Label");
             go.transform.SetParent(parent, false);
@@ -1239,8 +1241,13 @@ namespace MixedRealityProject.Drawing
             tmp.text = text;
             tmp.color = Color.white;
             tmp.alignment = align;
-            tmp.enableAutoSizing = false;
+            tmp.enableAutoSizing = autoFit;
             tmp.fontSize = fontSize;
+            if (autoFit)
+            {
+                tmp.fontSizeMax = fontSize;        // mai più grande di oggi (inglese invariato)
+                tmp.fontSizeMin = fontSize * 0.55f; // si restringe solo per le lingue più lunghe
+            }
             tmp.enableWordWrapping = false;
             tmp.overflowMode = TextOverflowModes.Overflow;
             tmp.rectTransform.sizeDelta = box;
