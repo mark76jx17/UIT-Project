@@ -8,12 +8,28 @@ namespace MixedRealityProject.Drawing
     /// best-fit del contorno (metodo di Newell), si proiettano i punti in 2D e
     /// si triangola il poligono con l'ear clipping. La mesh risultante usa i
     /// punti 3D originali (tollera contorni non perfettamente piani) ed è a
-    /// due facce. Contorni degeneri o fortemente auto-intersecanti producono
-    /// un riempimento parziale o nullo, mai un crash.
+    /// due facce.
+    /// I contorni che si auto-intersecano (un "8", un ∞, un tratto che si
+    /// ripassa sopra) vengono prima spezzati nei loro anelli semplici nei punti
+    /// di incrocio: così OGNI lobo viene riempito, non solo quello dominante.
+    /// Contorni degeneri o collineari producono un riempimento parziale o
+    /// nullo, mai un crash.
     /// </summary>
     public static class FillSurface
     {
         const int MaxContourPoints = 120; // l'ear clipping è O(n²): si decima
+        const int MaxLoops = 64;          // guardia anti-blowup su input patologici
+
+        // Un vertice del contorno: posizione 2D sul piano (per la triangolazione)
+        // accoppiata alla posizione 3D originale (per la mesh). I punti di
+        // incrocio creati dallo split ricavano la 3D interpolando lungo lo spigolo,
+        // così si conserva la tolleranza ai contorni non perfettamente piani.
+        readonly struct Vert
+        {
+            public readonly Vector2 uv;
+            public readonly Vector3 pos;
+            public Vert(Vector2 uv, Vector3 pos) { this.uv = uv; this.pos = pos; }
+        }
 
         public static GameObject Build(IReadOnlyList<Vector3> contour, Material material)
         {
@@ -47,18 +63,45 @@ namespace MixedRealityProject.Drawing
                 : Vector3.Cross(normal, Vector3.right).normalized;
             var v = Vector3.Cross(normal, u);
 
-            var projected = new List<Vector2>(points.Count);
+            // Proietta in 2D mantenendo accanto la 3D originale.
+            var loop = new List<Vert>(points.Count);
             foreach (var p in points)
             {
                 var d = p - centroid;
-                projected.Add(new Vector2(Vector3.Dot(d, u), Vector3.Dot(d, v)));
+                loop.Add(new Vert(new Vector2(Vector3.Dot(d, u), Vector3.Dot(d, v)), p));
             }
 
-            var triangles = Triangulate(projected);
+            // Spezza il contorno auto-intersecante nei suoi anelli semplici: ogni
+            // anello ha un suo verso coerente, quindi l'ear clipping lo riempie.
+            var loops = new List<List<Vert>>();
+            SplitIntoSimpleLoops(loop, loops);
+
+            // Triangola ogni anello e accumula vertici + indici in un'unica mesh.
+            var verts = new List<Vector3>();
+            var triangles = new List<int>();
+            var poly2d = new List<Vector2>();
+            foreach (var l in loops)
+            {
+                if (l.Count < 3)
+                    continue;
+                poly2d.Clear();
+                foreach (var vert in l)
+                    poly2d.Add(vert.uv);
+
+                var local = Triangulate(poly2d);
+                if (local.Count == 0)
+                    continue;
+
+                int baseIndex = verts.Count;
+                foreach (var vert in l)
+                    verts.Add(vert.pos);
+                foreach (var idx in local)
+                    triangles.Add(baseIndex + idx);
+            }
             if (triangles.Count == 0)
                 return null;
 
-            return BuildMesh(points, triangles, normal, material);
+            return BuildMesh(verts, triangles, normal, material);
         }
 
         static List<Vector3> Prepare(IReadOnlyList<Vector3> contour)
@@ -78,16 +121,95 @@ namespace MixedRealityProject.Drawing
             return points;
         }
 
-        static GameObject BuildMesh(List<Vector3> points, List<int> triangles,
+        /// <summary>
+        /// Decompone un anello (eventualmente auto-intersecante) negli anelli
+        /// semplici che lo compongono. Trova il PRIMO incrocio proprio tra due
+        /// spigoli non adiacenti, taglia il poligono in due sotto-anelli che
+        /// condividono il punto d'incrocio e ricorre su entrambi. Senza incroci
+        /// l'anello è semplice e viene aggiunto all'output.
+        /// </summary>
+        static void SplitIntoSimpleLoops(List<Vert> loop, List<List<Vert>> output)
+        {
+            int m = loop.Count;
+            if (m < 3 || output.Count >= MaxLoops)
+            {
+                if (m >= 3)
+                    output.Add(loop);
+                return;
+            }
+
+            for (int i = 0; i < m; i++)
+            {
+                var a0 = loop[i].uv;
+                var a1 = loop[(i + 1) % m].uv;
+                for (int j = i + 2; j < m; j++)
+                {
+                    // Salta lo spigolo che si richiude su i (adiacente via chiusura).
+                    if (i == 0 && j == m - 1)
+                        continue;
+                    var b0 = loop[j].uv;
+                    var b1 = loop[(j + 1) % m].uv;
+                    if (!SegmentsIntersect(a0, a1, b0, b1, out float t, out Vector2 x))
+                        continue;
+
+                    // Punto d'incrocio: 3D interpolata lungo lo spigolo i (preserva
+                    // l'eventuale non-planarità del contorno).
+                    var xv = new Vert(x, Vector3.Lerp(loop[i].pos, loop[(i + 1) % m].pos, t));
+
+                    // Anello A: X, poi i vertici i+1..j.
+                    var loopA = new List<Vert>(j - i + 1) { xv };
+                    for (int k = i + 1; k <= j; k++)
+                        loopA.Add(loop[k]);
+
+                    // Anello B: X, poi j+1..m-1 e 0..i (avvolgendo).
+                    var loopB = new List<Vert>(m - (j - i) + 1) { xv };
+                    for (int k = j + 1; k < m; k++)
+                        loopB.Add(loop[k]);
+                    for (int k = 0; k <= i; k++)
+                        loopB.Add(loop[k]);
+
+                    SplitIntoSimpleLoops(loopA, output);
+                    SplitIntoSimpleLoops(loopB, output);
+                    return;
+                }
+            }
+
+            output.Add(loop); // nessun incrocio: anello semplice
+        }
+
+        // Incrocio PROPRIO di due segmenti 2D (p→p2) e (q→q2): true solo se si
+        // tagliano all'interno di entrambi (estremi esclusi, con margine), così
+        // non si spezza in corrispondenza di vertici condivisi o tocchi degeneri.
+        static bool SegmentsIntersect(Vector2 p, Vector2 p2, Vector2 q, Vector2 q2,
+            out float t, out Vector2 point)
+        {
+            t = 0f;
+            point = default;
+            var r = p2 - p;
+            var d = q2 - q;
+            float denom = r.x * d.y - r.y * d.x;
+            if (Mathf.Abs(denom) < 1e-12f)
+                return false; // paralleli o degeneri
+            var qp = q - p;
+            t = (qp.x * d.y - qp.y * d.x) / denom;
+            float s = (qp.x * r.y - qp.y * r.x) / denom;
+            const float e = 1e-4f;
+            if (t <= e || t >= 1f - e || s <= e || s >= 1f - e)
+                return false;
+            point = p + t * r;
+            return true;
+        }
+
+        static GameObject BuildMesh(List<Vector3> verts, List<int> triangles,
             Vector3 normal, Material material)
         {
-            int n = points.Count;
+            int n = verts.Count;
             var vertices = new Vector3[n * 2];
             var normals = new Vector3[n * 2];
             for (int i = 0; i < n; i++)
             {
-                vertices[i] = points[i];
-                vertices[i + n] = points[i];
+                vertices[i] = verts[i];
+                vertices[i + n] = verts[i];
                 normals[i] = normal;
                 normals[i + n] = -normal;
             }
@@ -120,6 +242,7 @@ namespace MixedRealityProject.Drawing
         }
 
         // Ear clipping per poligoni semplici, in senso antiorario.
+        // Ritorna indici (0..polygon.Count-1) nel poligono passato.
         static List<int> Triangulate(List<Vector2> polygon)
         {
             var indices = new List<int>();
