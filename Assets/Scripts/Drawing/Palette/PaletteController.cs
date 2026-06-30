@@ -78,7 +78,7 @@ namespace MixedRealityProject.Drawing
         const float ToggleFont = ButtonFont; // Pressure/Mirror/Grid/Snap uguali a Draw/Fill/Erase
         const float SliderLabelFont = 0.13f; // label degli slider: piccola ma leggibile
 
-        const float ToolSmallLabelFont = 0.15f;
+        const float ToolSmallLabelFont = SliderLabelFont;
 
         // Icone nei bottoni testuali (Draw/Fill/Erase, Undo/Redo/Save/Load): disattivate
         // su richiesta — solo label testuale. Il codice icone (ToolIcon/MakeIconImage)
@@ -404,7 +404,11 @@ namespace MixedRealityProject.Drawing
                 alphaLabel.Size, SliderLabelFont, TextAlignmentOptions.Left, autoFit: true);
             var alpha = new GameObject("AlphaSlider");
             alpha.transform.SetParent(panel.transform, false);
-            alpha.transform.localPosition = alphaCell.Center;
+
+            Vector3 alphaSliderPos = alphaCell.Center;
+            alphaSliderPos.x -= 0.008f; // sposta Opacity poco poco a sinistra
+            alpha.transform.localPosition = alphaSliderPos;
+
             alpha.AddComponent<AlphaSlider>().Build(new Vector2(alphaCell.Size.x, 0.016f));
 
             // separator
@@ -431,11 +435,15 @@ namespace MixedRealityProject.Drawing
                 sizeLabel.Size, SliderLabelFont, TextAlignmentOptions.Left, autoFit: true);
             var size = new GameObject("SizeSlider");
             size.transform.SetParent(panel.transform, false);
-            size.transform.localPosition = sizeCell.Center;
+
+            Vector3 sizeSliderPos = sizeCell.Center;
+            sizeSliderPos.x -= 0.008f; // sposta Size poco poco a sinistra
+            size.transform.localPosition = sizeSliderPos;
+
             size.AddComponent<SizeSlider>().Build(new Vector2(sizeCell.Size.x, 0.018f));
 
             // separator
-            layout.Gap(0.012f);
+            layout.Gap(0.008f);
             MakeRounded(panel.transform, "Sep2",
                 new Vector3(0f, layout.Cursor, z),
                 new Vector2(panelSize.x - pad * 2f, 0.002f),
@@ -461,18 +469,18 @@ namespace MixedRealityProject.Drawing
 
 
             // ---------- SEPARATOR ----------
-            layout.Gap(0.010f);
+            layout.Gap(0.006f);
 
             MakeRounded(panel.transform, "Sep3",
                 new Vector3(0f, layout.Cursor, z),
                 new Vector2(panelSize.x - pad * 2f, 0.002f),
                 0.001f, TrackColor, QueueControl);
 
-            layout.Gap(0.019f);
+            layout.Gap(0.012f);
 
 
             // ---------- TOOL ----------
-            var toolsRow = layout.Row(0.044f);
+            var toolsRow = layout.Row(0.060f);
             var toolCells = toolsRow.Split(3);
 
             // Draw: stessa posizione, ma più stretto.
@@ -1110,23 +1118,21 @@ namespace MixedRealityProject.Drawing
             var b = MakeRoundedButton(panel.transform, labelKey, cell.Center, cell.Size,
                 Mathf.Min(0.008f, cell.Size.y * 0.3f), ButtonColor, action);
 
-            // Scritta piccola in alto a sinistra
             MakeLabel(
                 b.transform,
                 Localization.Get(labelKey),
-                new Vector3(-cell.Size.x * 0.05f, cell.Size.y * 0.30f, -0.004f),
-                new Vector2(cell.Size.x * 0.70f, cell.Size.y * 0.25f),
+                new Vector3(cell.Size.x * 0.03f, cell.Size.y * 0.27f, -0.004f),
+                new Vector2(cell.Size.x * 0.88f, cell.Size.y * 0.36f),
                 ToolSmallLabelFont,
                 TextAlignmentOptions.TopLeft,
                 autoFit: true
             );
 
-            // Icona grande al centro
             MakeIconImage(
                 b.transform,
                 iconName,
-                new Vector3(0f, -cell.Size.y * 0.08f, -0.004f),
-                Mathf.Min(cell.Size.x, cell.Size.y) * 0.62f
+                new Vector3(0f, -cell.Size.y * 0.11f, -0.004f),
+                Mathf.Min(cell.Size.x, cell.Size.y) * 0.53f
             );
 
             return b.GetComponent<Renderer>();
@@ -1163,9 +1169,9 @@ namespace MixedRealityProject.Drawing
             MakeLabel(
                 erase.transform,
                 Localization.Get("erase"),
-                new Vector3(buttonW * 0.04f, buttonH * 0.28f, -0.004f),
-                new Vector2(buttonW * 0.86f, buttonH * 0.26f),
-                ToolSmallLabelFont * 0.81f,
+                new Vector3(buttonW * 0.06f, buttonH * 0.27f, -0.004f),
+                new Vector2(buttonW * 0.92f, buttonH * 0.36f),
+                ToolSmallLabelFont,
                 TextAlignmentOptions.TopLeft,
                 autoFit: true
             );
@@ -1174,7 +1180,7 @@ namespace MixedRealityProject.Drawing
                 erase.transform,
                 "eraser",
                 new Vector3(0f, -buttonH * 0.09f, -0.005f),
-                Mathf.Min(buttonW, buttonH) * 0.46f
+                Mathf.Min(buttonW, buttonH) * 0.50f
             );
 
             // -------- Delete --------
@@ -1193,9 +1199,9 @@ namespace MixedRealityProject.Drawing
             MakeLabel(
                 delete.transform,
                 Localization.Get("delete"),
-                new Vector3(buttonW * 0.04f, buttonH * 0.28f, -0.004f),
-                new Vector2(buttonW * 0.86f, buttonH * 0.26f),
-                ToolSmallLabelFont * 0.81f,
+                new Vector3(buttonW * 0.06f, buttonH * 0.27f, -0.004f),
+                new Vector2(buttonW * 0.92f, buttonH * 0.36f),
+                ToolSmallLabelFont,
                 TextAlignmentOptions.TopLeft,
                 autoFit: true
             );
@@ -1203,7 +1209,7 @@ namespace MixedRealityProject.Drawing
             MakeIconImage(
                 delete.transform,
                 "close",
-                new Vector3(0f, -buttonH * 0.09f, -0.005f),
+                new Vector3(-buttonW * 0.04f, -buttonH * 0.09f, -0.005f),
                 Mathf.Min(buttonW, buttonH) * 0.43f
             );
         }
