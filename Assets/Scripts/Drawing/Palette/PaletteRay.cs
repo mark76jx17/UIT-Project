@@ -17,7 +17,25 @@ namespace MixedRealityProject.Drawing
     /// </summary>
     public class PaletteRay : MonoBehaviour
     {
+        public enum HandRole { Brush, Palette }
+
+        // Brush: mano del pennello (origine dalla punta, sopprime il disegno mentre punta). Palette:
+        // mano che tiene la palette, usata SOLO quando la palette è fissata nella stanza (Placed),
+        // per poterla comandare col secondo controller. Origine dal controller, niente disegno.
+        public HandRole Role { get; set; } = HandRole.Brush;
+
+        // Solo per il ray della mano-palette: attivo solo quando la palette è fissata nella stanza.
+        public bool RequiresPlaced { get; set; }
+
+        // True quando il ray della mano-palette sta puntando la palette: PaletteController lo
+        // consulta per NON ri-agganciare se il trigger serviva a cliccare un controllo.
+        public static bool PaletteHandOnPalette;
+
         public BrushController Brush { get; set; }
+
+        // Controller risolto dinamicamente, così segue il cambio di mano dominante.
+        OVRInput.Controller Controller =>
+            Role == HandRole.Brush ? StrokeSettings.BrushHand : StrokeSettings.PaletteHand;
 
         [SerializeField] float maxDistance = 2f;
         [SerializeField] float pressThreshold = 0.55f;
@@ -50,15 +68,23 @@ namespace MixedRealityProject.Drawing
 
         void Update()
         {
-            if (Brush == null)
+            // La mano-palette comanda la palette SOLO quando è fissata nella stanza (Placed):
+            // appesa alla mano non avrebbe senso e darebbe pressioni accidentali.
+            if (RequiresPlaced && !PaletteController.Placed)
+            {
+                line.enabled = false;
+                SetHoveredButton(null);
+                if (Role == HandRole.Palette)
+                    PaletteHandOnPalette = false;
                 return;
+            }
 
-            // Raggio allineato all'asse controller → punta del pennello: parte dalla
-            // pallina (BrushTip) ed è collineare con tip e controller, così "esce" da dove
-            // si punta visivamente. Prima partiva dal centro del controller lungo Z e, con
-            // la punta offset, appariva spostato di lato.
-            Vector3 origin = Brush.Tip != null ? Brush.Tip.position : transform.position;
-            Vector3 dir = Brush.Tip != null
+            // Origine/direzione del ray: dalla punta del pennello se presente (collineare con
+            // tip+controller, così "esce" da dove si punta); altrimenti dal controller in avanti
+            // (mano-palette, che non ha punta del pennello).
+            bool hasTip = Brush != null && Brush.Tip != null;
+            Vector3 origin = hasTip ? Brush.Tip.position : transform.position;
+            Vector3 dir = hasTip
                 ? (Brush.Tip.position - transform.position).normalized
                 : transform.forward;
 
@@ -70,7 +96,10 @@ namespace MixedRealityProject.Drawing
             bool onModalSurface = !onControl && TryHitModalSurface(origin, dir, out hit);
             bool onPalette = onControl || onModalSurface;
 
-            float trigger = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, StrokeSettings.BrushHand);
+            if (Role == HandRole.Palette)
+                PaletteHandOnPalette = onPalette;
+
+            float trigger = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, Controller);
             bool pressed = trigger >= pressThreshold;
             bool justPressed = pressed && !wasPressed;
 
@@ -87,7 +116,8 @@ namespace MixedRealityProject.Drawing
             // o "View Shortcuts" che lo cambia): senza questo, appena onPalette torna falso il
             // pennello riprendeva a disegnare un "pallino" finché si teneva il trigger. A riposo
             // il raggio fa solo da hint quando punta la palette.
-            Brush.SuppressDrawing = pressed ? startedOnPalette : onPalette;
+            if (Brush != null) // la mano-palette non disegna: niente da sopprimere
+                Brush.SuppressDrawing = pressed ? startedOnPalette : onPalette;
 
             // Il raggio è visibile quando punta la palette ed è coerente con la modalità latchata.
             bool showRay = onPalette && (!pressed || startedOnPalette);

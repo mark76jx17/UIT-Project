@@ -114,6 +114,11 @@ namespace MixedRealityProject.Drawing
             material.SetInt("_ZWrite", 1);
             material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
             material.renderQueue = (int)RenderQueue.Geometry;
+            // Doppia faccia: i pannelli sono quad a faccia singola, quindi da DIETRO (palette
+            // fissata nella stanza, ci si gira attorno) sarebbero invisibili → si vedrebbe
+            // attraverso. Le facce posteriori scrivono comunque alpha = 1, quindi occludono il
+            // passthrough: la palette resta solida da ogni lato.
+            material.SetFloat("_Cull", (float)CullMode.Off);
             // Sul passthrough Quest è il canale ALPHA del framebuffer a decidere cosa
             // nasconde il mondo reale: un materiale opaco deve scrivere alpha = 1. Forzo
             // l'alpha del colore a 1 (es. PanelColor è 0.96 → lasciava trasparire ~4% del

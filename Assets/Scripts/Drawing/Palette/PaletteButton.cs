@@ -72,7 +72,10 @@ namespace MixedRealityProject.Drawing
 
         void OnTriggerEnter(Collider other)
         {
-            if (other.GetComponentInParent<BrushTip>() == null)
+            // Poke con la punta del pennello O con la sonda della mano-palette (palette fissata):
+            // così si può toccare da entrambi i controller.
+            if (other.GetComponentInParent<BrushTip>() == null
+                && other.GetComponentInParent<PalettePoke>() == null)
                 return;
             // Se un menu modale (Options) è aperto, i controlli "sotto" non rispondono.
             if (!PaletteController.IsInteractable(gameObject))

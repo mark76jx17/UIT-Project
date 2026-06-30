@@ -75,6 +75,23 @@ namespace MixedRealityProject.Drawing
                 paletteGrabGO.transform.SetParent(paletteAnchor, false);
                 paletteGrab = paletteGrabGO.AddComponent<GrabController>();
                 paletteGrab.Controller = StrokeSettings.PaletteHand;
+
+                // Quando la palette è fissata nella stanza si comanda anche col secondo controller
+                // (quello che la teneva): ray + poke. Il ray è attivo solo da palette fissata.
+                var paletteRay = paletteGrabGO.AddComponent<PaletteRay>();
+                paletteRay.Role = PaletteRay.HandRole.Palette;
+                paletteRay.RequiresPlaced = true;
+
+                // Sonda di poke sulla mano-palette: piccola sfera trigger + Rigidbody cinematico
+                // (serve a generare gli OnTriggerEnter sui pulsanti), marcata PalettePoke.
+                var poke = new GameObject("PalettePokeTip");
+                poke.transform.SetParent(paletteGrabGO.transform, false);
+                poke.transform.localPosition = new Vector3(0f, 0f, 0.03f); // poco davanti al controller
+                poke.AddComponent<PalettePoke>();
+                var pokeCol = poke.AddComponent<SphereCollider>();
+                pokeCol.isTrigger = true;
+                pokeCol.radius = 0.014f;
+                poke.AddComponent<Rigidbody>().isKinematic = true;
             }
 
             paletteGO = new GameObject("Palette");
