@@ -76,11 +76,14 @@ appariva come un **rettangolo bianco pieno**.)
   pannello (`PaletteController.EditorBuildShortcutsPanel`, guardia `#if UNITY_EDITOR`) e lo
   renderizza in `Assets/Drawing/Previews/shortcuts.png` per iterare il layout senza visore.
   Flag `PaletteController.DebugAnchorGrid` per disegnare la griglia di calibrazione anchor
-  (default **false**).
+  (default **false**). Il render è delegato all'helper condiviso `PanelPreviews.CapturePanel`.
   - **IMPORTANTE**: la `PreviewCam` del tool è **figlia di `root`**, così il
     `DestroyImmediate(root)` la elimina. (Bug risolto: prima era orfana e, col background
     grigio opaco, se la scena veniva salvata restava in scena coprendo tutto il passthrough
     → "tutto grigio". Vedi `documentazione/ambiente-mr-pulizia.md`.)
+- **Tools/Drawing/Preview All Panels** (`PanelPreviews`) — genera i PNG di **tutti** i pannelli
+  (palette / Options / shortcuts) in **tutte** le lingue, in un colpo solo. Dettagli completi
+  in `documentazione/preview-pannelli.md`.
 - `ShortcutControllerBaker` (Bake Controller Images) è **superato**: renderizzava i modelli
   FBX dei Touch Pro, approccio abbandonato a favore dello schema line-art. I PNG
   `touch-left/right.png` non sono più usati dal pannello.

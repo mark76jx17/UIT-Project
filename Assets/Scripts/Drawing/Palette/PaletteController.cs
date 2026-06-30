@@ -677,8 +677,10 @@ namespace MixedRealityProject.Drawing
             // chiuso: aggiungere una lingua la fa comparire qui dentro senza altre modifiche.
             const float langRowY = -0.066f;
             float langRowW = size.x - 0.05f;
+            // Box larga 0.09, testo allineato a sinistra: ancoro a +0.045 (mezza box) così il
+            // bordo sinistro del testo cade sul bordo della riga e non sborda dal pannello.
             MakeLabel(optionsPanel.transform, Localization.Get("language"),
-                new Vector3(-langRowW * 0.5f + 0.005f, langRowY, -0.004f),
+                new Vector3(-langRowW * 0.5f + 0.045f, langRowY, -0.004f),
                 new Vector2(0.09f, 0.03f), SliderLabelFont, TextAlignmentOptions.Left, autoFit: true);
             var ddSize = new Vector2(langRowW * 0.56f, 0.044f);
             var ddCenter = new Vector3(langRowW * 0.5f - ddSize.x * 0.5f, langRowY, -0.004f);
@@ -787,14 +789,36 @@ namespace MixedRealityProject.Drawing
         }
 
 #if UNITY_EDITOR
-        // Costruisce SOLO il pannello scorciatoie e lo restituisce attivo: usato dal tool di
-        // anteprima (Tools/Drawing/Preview Shortcuts Panel) per renderizzarlo a PNG senza Play.
-        // In Edit mode Awake/Start non girano, quindi istanziare e chiamare i builder è sicuro.
+        // Costruisce SOLO il pannello scorciatoie e lo restituisce attivo: usato dai tool di
+        // anteprima (Tools/Drawing/Preview Shortcuts Panel, Preview All Panels) per renderizzarlo
+        // a PNG senza Play. In Edit mode Awake/Start non girano, quindi istanziare e chiamare i
+        // builder è sicuro: costruiscono solo mesh leggendo gli static di StrokeSettings/Localization.
         public GameObject EditorBuildShortcutsPanel()
         {
             BuildShortcutsPanel();
             shortcutsPanel.SetActive(true);
             return shortcutsPanel;
+        }
+
+        // Pannello palette principale (color wheel, slider, tool, strisce pennelli/azioni). Le
+        // strisce sono figlie di `panel`, quindi ritornare `panel` basta a inquadrare tutto.
+        public GameObject EditorBuildMainPanel()
+        {
+            BuildPanel();
+            // BuildPanel non imposta il layer da solo (in-app lo fa Start/Rebuild dopo): qui serve
+            // perché la camera di anteprima filtra per PaletteLayer.
+            SetLayerRecursively(panel, PaletteLayer);
+            panel.SetActive(true);
+            return panel;
+        }
+
+        // Sotto-pannello Options (☰): mano dominante, lingua, View Shortcuts. BuildOptionsPanel lo
+        // lascia disattivato (in-app si apre col menu), quindi qui lo riattivo per il render.
+        public GameObject EditorBuildOptionsPanel()
+        {
+            BuildOptionsPanel();
+            optionsPanel.SetActive(true);
+            return optionsPanel;
         }
 #endif
 
@@ -1169,9 +1193,9 @@ namespace MixedRealityProject.Drawing
             MakeLabel(
                 erase.transform,
                 Localization.Get("erase"),
-                new Vector3(buttonW * 0.06f, buttonH * 0.27f, -0.004f),
-                new Vector2(buttonW * 0.92f, buttonH * 0.36f),
-                ToolSmallLabelFont,
+                new Vector3(buttonW * 0.04f, buttonH * 0.27f, -0.004f),
+                new Vector2(buttonW * 0.90f, buttonH * 0.36f),
+                ToolSmallLabelFont * 0.72f,
                 TextAlignmentOptions.TopLeft,
                 autoFit: true
             );
@@ -1199,9 +1223,9 @@ namespace MixedRealityProject.Drawing
             MakeLabel(
                 delete.transform,
                 Localization.Get("delete"),
-                new Vector3(buttonW * 0.06f, buttonH * 0.27f, -0.004f),
-                new Vector2(buttonW * 0.92f, buttonH * 0.36f),
-                ToolSmallLabelFont,
+                new Vector3(buttonW * 0.04f, buttonH * 0.27f, -0.004f),
+                new Vector2(buttonW * 0.90f, buttonH * 0.36f),
+                ToolSmallLabelFont * 0.72f,
                 TextAlignmentOptions.TopLeft,
                 autoFit: true
             );

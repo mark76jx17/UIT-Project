@@ -55,8 +55,10 @@ In `SampleScene` c'era un GameObject root **`PalettePreview`** (a `(20, 1.2, 0)`
 salvata per sbaglio — la palette vera la crea solo `DrawingRig` a runtime. Quel doppione
 restava fisso in scena (visto come una palette "specchiata/strana" sotto il pavimento) ed
 eseguiva pure un **secondo `PaletteController`** all'avvio. **Rimosso** l'intero sottoalbero.
-NB: il tool *Tools/Palette Preview/Build* può ricrearlo — non salvare la scena dopo averlo
-lanciato.
+NB: i tool di preview attuali (`Tools/Drawing/Preview Shortcuts Panel` e `Preview All Panels`,
+vedi `preview-pannelli.md`) renderizzano a **PNG** e **non lasciano nulla in scena**, quindi non
+ripropongono questo problema. (Il vecchio menu `Tools/Palette Preview/Build` che ricreava il
+doppione in scena non esiste più.)
 
 ### 4b. Camere fantasma `PreviewCam` → "tutto grigio"
 Il tool **Preview Shortcuts Panel** creava una `PreviewCam` (background **grigio opaco**
