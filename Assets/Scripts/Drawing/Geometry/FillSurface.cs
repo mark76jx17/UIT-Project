@@ -104,6 +104,131 @@ namespace MixedRealityProject.Drawing
             return BuildMesh(verts, triangles, normal, material);
         }
 
+        /// <summary>
+        /// Come <see cref="Build"/> ma con dei BUCHI: riempie il contorno esterno lasciando
+        /// vuote le aree racchiuse dai contorni interni (ciambella, lettera O, e QUALSIASI
+        /// numero di buchi anche annidati). Riempimento a SCANLINE con regola even-odd: per
+        /// ogni riga si trovano le intersezioni con TUTTI i bordi (esterno + buchi), si
+        /// ordinano e si riempie a coppie → i buchi restano vuoti automaticamente, senza
+        /// "ponti" fragili. La mesh è a striscioline orizzontali sul piano di best-fit; i
+        /// bordi a gradini cadono sotto i tratti (con la dilatazione del fill) e non si
+        /// vedono. Robusto: niente più fallback a pieno con più buchi.
+        /// </summary>
+        public static GameObject BuildWithHoles(IReadOnlyList<Vector3> outer,
+            IReadOnlyList<IReadOnlyList<Vector3>> holes, Material material)
+        {
+            if (holes == null || holes.Count == 0)
+                return Build(outer, material);
+
+            var op = Prepare(outer);
+            if (op.Count < 3)
+                return null;
+            if (!ComputePlane(op, out var centroid, out var normal, out var u, out var v))
+                return null;
+
+            // Spigoli 2D di esterno + buchi; l'intervallo verticale viene dall'esterno.
+            var edges = new List<(Vector2 a, Vector2 b)>();
+            AddLoopEdges(op, centroid, u, v, edges, out float minY, out float maxY);
+            foreach (var h in holes)
+            {
+                var hp = Prepare(h);
+                if (hp.Count >= 3)
+                    AddLoopEdges(hp, centroid, u, v, edges, out _, out _);
+            }
+            if (maxY - minY < 1e-5f)
+                return null;
+
+            int rows = Mathf.Clamp(Mathf.RoundToInt((maxY - minY) / 0.0025f), 24, 300);
+            float step = (maxY - minY) / rows;
+
+            var verts = new List<Vector3>();
+            var triangles = new List<int>();
+            var xs = new List<float>();
+            for (int r = 0; r < rows; r++)
+            {
+                float y0 = minY + r * step, y1 = y0 + step, yc = y0 + step * 0.5f;
+                xs.Clear();
+                foreach (var e in edges)
+                    if ((e.a.y <= yc) != (e.b.y <= yc))
+                        xs.Add(e.a.x + (yc - e.a.y) / (e.b.y - e.a.y) * (e.b.x - e.a.x));
+                if (xs.Count < 2)
+                    continue;
+                xs.Sort();
+                for (int k = 0; k + 1 < xs.Count; k += 2) // coppie = dentro il pieno (even-odd)
+                {
+                    float x1 = xs[k], x2 = xs[k + 1];
+                    if (x2 - x1 < 1e-6f)
+                        continue;
+                    int b = verts.Count;
+                    verts.Add(Plane3(centroid, u, v, x1, y0));
+                    verts.Add(Plane3(centroid, u, v, x2, y0));
+                    verts.Add(Plane3(centroid, u, v, x2, y1));
+                    verts.Add(Plane3(centroid, u, v, x1, y1));
+                    triangles.Add(b); triangles.Add(b + 1); triangles.Add(b + 2);
+                    triangles.Add(b); triangles.Add(b + 2); triangles.Add(b + 3);
+                }
+            }
+            if (triangles.Count == 0)
+                return Build(outer, material);
+            return BuildMesh(verts, triangles, normal, material);
+        }
+
+        // Piano di best-fit (Newell) + base 2D. False se il contorno è collineare.
+        static bool ComputePlane(List<Vector3> points, out Vector3 centroid,
+            out Vector3 normal, out Vector3 u, out Vector3 v)
+        {
+            centroid = Vector3.zero;
+            foreach (var p in points)
+                centroid += p;
+            centroid /= points.Count;
+
+            normal = Vector3.zero;
+            for (int i = 0; i < points.Count; i++)
+            {
+                var a = points[i];
+                var b = points[(i + 1) % points.Count];
+                normal.x += (a.y - b.y) * (a.z + b.z);
+                normal.y += (a.z - b.z) * (a.x + b.x);
+                normal.z += (a.x - b.x) * (a.y + b.y);
+            }
+            if (normal.sqrMagnitude < 1e-12f)
+            {
+                u = v = Vector3.zero;
+                return false;
+            }
+            normal.Normalize();
+            u = Mathf.Abs(normal.y) < 0.99f
+                ? Vector3.Cross(normal, Vector3.up).normalized
+                : Vector3.Cross(normal, Vector3.right).normalized;
+            v = Vector3.Cross(normal, u);
+            return true;
+        }
+
+        static Vector3 Plane3(Vector3 c, Vector3 u, Vector3 v, float x, float y) => c + x * u + y * v;
+
+        // Spigoli 2D di un anello (proiettati sul piano) + intervallo verticale.
+        static void AddLoopEdges(List<Vector3> pts, Vector3 c, Vector3 u, Vector3 v,
+            List<(Vector2 a, Vector2 b)> edges, out float minY, out float maxY)
+        {
+            minY = float.MaxValue; maxY = float.MinValue;
+            int n = pts.Count;
+            Vector2 prev = PlaneUV(pts[n - 1], c, u, v);
+            for (int i = 0; i < n; i++)
+            {
+                Vector2 cur = PlaneUV(pts[i], c, u, v);
+                edges.Add((prev, cur));
+                if (cur.y < minY) minY = cur.y;
+                if (cur.y > maxY) maxY = cur.y;
+                prev = cur;
+            }
+        }
+
+        static Vector2 PlaneUV(Vector3 p, Vector3 c, Vector3 u, Vector3 v)
+        {
+            Vector3 d = p - c;
+            return new Vector2(Vector3.Dot(d, u), Vector3.Dot(d, v));
+        }
+
         static List<Vector3> Prepare(IReadOnlyList<Vector3> contour)
         {
             var points = new List<Vector3>(contour);

@@ -23,11 +23,21 @@ namespace MixedRealityProject.Drawing
             public int brushType;
             public bool isPoint;
             public bool filled;
+            public bool isFill; // questo oggetto È un riempimento (points = contorno esterno)
             public Color fillColor;
+            public HoleData[] holes; // buchi del riempimento (ciambella); null se nessuno
             public Vector3 localPosition;
             public Quaternion localRotation;
             public Vector3 localScale;
             public int parent = -1;
+
+            // Un buco (contorno interno) di un riempimento. Classe a sé perché JsonUtility
+            // non serializza liste annidate direttamente.
+            [Serializable]
+            public class HoleData
+            {
+                public Vector3[] points;
+            }
         }
 
         [Serializable]
@@ -101,7 +111,9 @@ namespace MixedRealityProject.Drawing
                     brushType = (int)record.brushType,
                     isPoint = record.isPoint,
                     filled = record.filled,
+                    isFill = record.isFill,
                     fillColor = record.fillColor,
+                    holes = CaptureHoles(record.holes),
                     localPosition = record.transform.localPosition,
                     localRotation = record.transform.localRotation,
                     localScale = record.transform.localScale,
@@ -110,6 +122,16 @@ namespace MixedRealityProject.Drawing
                 });
             }
             return items;
+        }
+
+        static ItemData.HoleData[] CaptureHoles(List<List<Vector3>> holes)
+        {
+            if (holes == null || holes.Count == 0)
+                return null;
+            var arr = new ItemData.HoleData[holes.Count];
+            for (int i = 0; i < holes.Count; i++)
+                arr[i] = new ItemData.HoleData { points = holes[i].ToArray() };
+            return arr;
         }
 
         /// <summary>
@@ -181,7 +203,18 @@ namespace MixedRealityProject.Drawing
             foreach (var data in items)
             {
                 GameObject go;
-                if (data.isPoint)
+                if (data.isFill)
+                {
+                    // Riempimento ricostruito dal contorno salvato + eventuali buchi. Senza
+                    // genitore = indipendente (afferrabile); con genitore = fill di gruppo,
+                    // riagganciato sotto la sua radice dal blocco parent sotto.
+                    var holeLoops = new List<List<Vector3>>();
+                    if (data.holes != null)
+                        foreach (var h in data.holes)
+                            holeLoops.Add(new List<Vector3>(h.points));
+                    go = Stroke.RebuildFill(data.points, holeLoops, data.fillColor, (BrushType)data.brushType, data.parent < 0);
+                }
+                else if (data.isPoint)
                 {
                     go = Stroke.CreatePoint(Vector3.zero, data.radii[0], data.color, (BrushType)data.brushType);
                 }

@@ -57,6 +57,13 @@ namespace MixedRealityProject.Drawing
         [Header("Fill (secchiello)")]
         [Tooltip("Distanza massima tra gli estremi perché un tratto sia 'chiuso' e riempibile.")]
         [SerializeField] float fillCloseThreshold = 0.05f;
+        [Tooltip("Raggio di ricerca delle linee per riempire la CELLA puntata " +
+                 "(reticoli / linee che si incrociano nel mezzo).")]
+        [SerializeField] float regionSearchRadius = 0.6f;
+        [Tooltip("ON = riempimento 'col pennello' ad anelli concentrici (più leggero ma con " +
+                 "buchi tra gli anelli). OFF (consigliato) = riempimento PIENO che copia il " +
+                 "tipo di pennello (es. Glow brilla): fitto, preciso, attaccato al contorno.")]
+        [SerializeField] bool contourRingFill = false;
 
         [Header("Gomma")]
         [Tooltip("Raggio entro cui la gomma toglie i punti del tratto (cancellazione parziale).")]
@@ -104,6 +111,13 @@ namespace MixedRealityProject.Drawing
 
         bool fillConsumed;     // un solo riempimento per pressione del trigger
         Transform fillHover;   // tratto chiuso attualmente evidenziato in modo Fill
+
+        // Anteprima della cella (modo Fill, reticoli): mesh semitrasparente di cosa
+        // riempiresti, ricalcolata a intervalli (l'arrangement è troppo caro a ogni frame).
+        GameObject fillPreview;
+        Material fillPreviewMat;
+        Vector3 lastPreviewSeed;
+        float previewTimer;
 
         // Haptic state
         float hapticTimer;
@@ -191,6 +205,10 @@ namespace MixedRealityProject.Drawing
         {
             if (snapHint != null)
                 Destroy(snapHint.gameObject); // non è figlio del rig: va liberato a mano
+            if (fillPreview != null)
+                Destroy(fillPreview);
+            if (fillPreviewMat != null)
+                Destroy(fillPreviewMat);
         }
 
         void Update()
@@ -226,6 +244,7 @@ namespace MixedRealityProject.Drawing
             {
                 if (pressed)
                     EndPress(position);
+                HideFillPreview();
                 PickColorAt(position);
                 return;
             }
@@ -236,6 +255,7 @@ namespace MixedRealityProject.Drawing
             {
                 if (pressed)
                     EndPress(position);
+                HideFillPreview();
                 return;
             }
 
@@ -245,6 +265,7 @@ namespace MixedRealityProject.Drawing
                 if (pressed)
                     EndPress(position);
                 UpdateFillHover(position);
+                UpdateFillPreview(position, trigger);
                 if (trigger >= pressThreshold && !fillConsumed)
                 {
                     FillAt(position);
@@ -261,6 +282,7 @@ namespace MixedRealityProject.Drawing
                 StrokeHighlight.Clear(fillHover);
                 fillHover = null;
             }
+            HideFillPreview();
 
             if (StrokeSettings.DeleteMode)
             {
@@ -567,19 +589,55 @@ namespace MixedRealityProject.Drawing
             return pressPosition + new Vector3(0f, 0f, d.z);
         }
 
-        // Secchiello: riempie il tratto chiuso puntato col colore corrente.
+        // Secchiello: riempie l'area chiusa puntata col colore corrente.
         void FillAt(Vector3 position)
         {
-            if (!FindNearbyItem(position, out var target, out _))
+            GameObject fill = null;
+
+            if (contourRingFill)
+            {
+                // "Col pennello": anelli concentrici che seguono il contorno, col pennello
+                // (tipo + spessore) copiato dall'oggetto. Si aggancia all'oggetto se ne
+                // delimita uno solo (si muove con lui).
+                var rings = FillRegion.FindRings(position, regionSearchRadius,
+                    out var ringRoot, out var ringBrush, out var ringRadius);
+                if (rings != null)
+                {
+                    fill = Stroke.MakeRingFill(rings, StrokeSettings.Color, ringBrush, ringRadius);
+                    if (ringRoot != null)
+                        fill.transform.SetParent(ringRoot, true);
+                }
+            }
+            else
+            {
+                if (FindNearbyItem(position, out var target, out _))
+                {
+                    var stroke = target.GetComponent<Stroke>();
+                    if (stroke != null)
+                        fill = stroke.FillWith(StrokeSettings.Color, fillCloseThreshold);
+                    if (fill == null) // tratto non chiuso da solo: prova ad unire i tratti del gruppo
+                        fill = Stroke.FillGroup(target, StrokeSettings.Color, fillCloseThreshold);
+                }
+                if (fill == null) // nessun anello: riempi la REGIONE puntata (cella/ciambella)
+                    fill = FillRegion.FillCellAt(position, StrokeSettings.Color, regionSearchRadius, fillCloseThreshold);
+            }
+
+            if (fill == null)
                 return;
-            var stroke = target.GetComponent<Stroke>();
-            if (stroke == null)
-                return;
-            var fill = stroke.FillWith(StrokeSettings.Color, fillCloseThreshold);
-            if (fill == null) // riprova: anello formato da più tratti uniti col magnete
-                fill = Stroke.FillGroup(target, StrokeSettings.Color, fillCloseThreshold);
-            if (fill != null)
+
+            // Ricolora-in-posto: se qui c'era già un riempimento, sostituiscilo invece di
+            // sovrapporlo (niente z-fight; un solo passo di undo).
+            var covered = FillRegion.CoveringFills(position, fill);
+            if (covered.Count > 0)
+            {
+                foreach (var go in covered)
+                    go.SetActive(false);
+                StrokeHistory.PushReplace(covered.ToArray(), new[] { fill });
+            }
+            else
+            {
                 StrokeHistory.Push(fill);
+            }
         }
 
         // Evidenzia il tratto chiuso sotto la punta, così sai cosa riempirai.
@@ -591,6 +649,8 @@ namespace MixedRealityProject.Drawing
                 var stroke = target.GetComponent<Stroke>();
                 if (stroke != null && stroke.IsCloseable(fillCloseThreshold))
                     found = target;
+                else if (Stroke.IsGroupFillable(target, fillCloseThreshold)) // anello da più tratti uniti
+                    found = target;
             }
             if (fillHover == found)
                 return;
@@ -599,6 +659,51 @@ namespace MixedRealityProject.Drawing
             fillHover = found;
             if (fillHover != null)
                 StrokeHighlight.Set(fillHover, 1.3f);
+        }
+
+        // Anteprima della cella del reticolo che riempiresti: mesh semitrasparente col colore
+        // corrente. L'arrangement è caro, quindi si ricalcola solo se la punta si è spostata
+        // o ogni ~0.15 s. Niente anteprima se stai già puntando un tratto/gruppo o premendo.
+        void UpdateFillPreview(Vector3 position, float trigger)
+        {
+            if (fillHover != null || trigger >= pressThreshold)
+            {
+                HideFillPreview();
+                return;
+            }
+
+            previewTimer -= Time.deltaTime;
+            bool moved = (position - lastPreviewSeed).sqrMagnitude > 0.02f * 0.02f;
+            if (!moved && previewTimer > 0f)
+                return;
+            previewTimer = 0.15f;
+            lastPreviewSeed = position;
+
+            var region = FillRegion.FindRegion(position, regionSearchRadius, fillCloseThreshold);
+            HideFillPreview(); // via la vecchia mesh (e il materiale istanziato che porta con sé)
+            if (region == null)
+                return;
+
+            if (fillPreviewMat == null)
+                fillPreviewMat = BrushMaterials.CreateUnlit(PreviewColor());
+            else
+                fillPreviewMat.SetColor(BaseColorId, PreviewColor());
+            fillPreview = FillSurface.BuildWithHoles(region.outer, region.holes, fillPreviewMat);
+        }
+
+        void HideFillPreview()
+        {
+            if (fillPreview != null)
+                Destroy(fillPreview);
+            fillPreview = null;
+        }
+
+        // Colore corrente, semitrasparente: l'anteprima mostra cosa riempiresti.
+        Color PreviewColor()
+        {
+            var c = StrokeSettings.BaseColor;
+            c.a = 0.35f;
+            return c;
         }
 
         // Buffer riusato per le query di prossimità: la variante NonAlloc non genera

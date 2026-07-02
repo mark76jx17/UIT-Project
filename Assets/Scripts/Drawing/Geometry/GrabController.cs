@@ -15,6 +15,9 @@ namespace MixedRealityProject.Drawing
     {
         [SerializeField] OVRInput.Controller controller = OVRInput.Controller.RTouch;
         [SerializeField] float grabRadius = 0.04f;
+        [Tooltip("Unione magnete: tenendo un oggetto, un altro oggetto disegnato entro " +
+                 "questo raggio dalla mano si evidenzia come candidato; rilasciando si fondono.")]
+        [SerializeField] float mergeRadius = 0.06f;
         [Tooltip("Raggio della sonda sulla punta del pennello: più piccolo dell'area del " +
                  "controller, per selezioni precise puntando un tratto sottile.")]
         [SerializeField] float tipProbeRadius = 0.018f;
@@ -29,6 +32,7 @@ namespace MixedRealityProject.Drawing
 
         Transform holding;
         Transform hovered;
+        Transform mergeTarget; // candidato all'unione mentre tieni un oggetto (magnete post-disegno)
 
         // Haptic state
         float hapticTimer;
@@ -86,11 +90,7 @@ namespace MixedRealityProject.Drawing
             }
             else if (grip <= releaseThreshold || holding == null /* distrutto (gomma) */)
             {
-                GrabSession.Remove(this);
-                StrokeHighlight.Clear(holding);
-                holding = null;
-                // Impulso di rilascio: più morbido
-                HapticPulse(0.03f, frequency: 0.2f, amplitude: 0.3f);
+                ReleaseHolding();
             }
             else if (controller == StrokeSettings.BrushHand
                      && OVRInput.GetDown(OVRInput.Button.Two, controller))
@@ -105,6 +105,90 @@ namespace MixedRealityProject.Drawing
                     StrokeHistory.Push(copy);
                 }
             }
+            else
+            {
+                // Tenendo l'oggetto: cerca un altro oggetto disegnato vicino e lo evidenzia
+                // come candidato all'unione (magnete). Al rilascio i due si fondono.
+                UpdateMergeCandidate();
+            }
+        }
+
+        // Rilascio dell'oggetto tenuto. Se un candidato all'unione è evidenziato e l'oggetto
+        // non è più tenuto da nessun'altra mano, i due diventano UN gruppo (l'oggetto tenuto
+        // entra nella gerarchia del bersaglio, mantenendo la posa nel mondo). Annullabile.
+        void ReleaseHolding()
+        {
+            GrabSession.Remove(this);
+
+            bool merged = false;
+            if (mergeTarget != null && holding != null
+                && !GrabSession.IsHeld(holding)
+                && mergeTarget.gameObject.activeInHierarchy
+                && holding != mergeTarget
+                && !mergeTarget.IsChildOf(holding) && !holding.IsChildOf(mergeTarget))
+            {
+                var child = holding;
+                var oldParent = child.parent;
+                child.SetParent(mergeTarget, true); // mantiene la posa nel mondo
+                var item = child.GetComponent<DrawnItem>();
+                if (item != null)
+                    Destroy(item); // il "vero" oggetto ora è la radice del gruppo
+                StrokeHistory.PushMerge(child, oldParent, mergeTarget);
+                merged = true;
+            }
+
+            if (mergeTarget != null)
+                StrokeHighlight.Clear(mergeTarget); // copre anche l'oggetto appena unito (ora figlio)
+            if (holding != null)
+                StrokeHighlight.Clear(holding);
+            mergeTarget = null;
+            holding = null;
+
+            // Unione: impulso deciso (conferma); rilascio semplice: impulso morbido.
+            if (merged)
+                HapticPulse(0.08f, frequency: 0.8f, amplitude: 0.8f);
+            else
+                HapticPulse(0.03f, frequency: 0.2f, amplitude: 0.3f);
+        }
+
+        // Mentre tieni un oggetto: trova un altro oggetto disegnato vicino alla mano e lo
+        // evidenzia col colore "magnete". Si aggiorna solo al cambio di candidato.
+        void UpdateMergeCandidate()
+        {
+            Transform found = FindMergeCandidate();
+            if (found == mergeTarget)
+                return;
+            if (mergeTarget != null && !GrabSession.IsHeld(mergeTarget))
+                StrokeHighlight.Clear(mergeTarget);
+            mergeTarget = found;
+            if (mergeTarget != null)
+            {
+                StrokeHighlight.SetMergeHover(mergeTarget);
+                HapticPulse(0.02f, frequency: 0.5f, amplitude: 0.4f); // "qui si aggancia"
+            }
+        }
+
+        // Oggetto disegnato (DrawnItem) più vicino alla mano, diverso da quello tenuto e non
+        // imparentato con esso. Lo specchio (MirrorHandle) è escluso: non si unisce.
+        Transform FindMergeCandidate()
+        {
+            if (holding == null)
+                return null;
+            Vector3 probe = tipProbe != null ? tipProbe.position : transform.position;
+            int count = Physics.OverlapSphereNonAlloc(probe, mergeRadius, overlapBuffer,
+                Physics.AllLayers, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < count; i++)
+            {
+                var root = GrabRoot(overlapBuffer[i]);
+                if (root == null || root == holding)
+                    continue;
+                if (root.GetComponent<DrawnItem>() == null) // solo oggetti disegnati (no specchio)
+                    continue;
+                if (root.IsChildOf(holding) || holding.IsChildOf(root))
+                    continue;
+                return root;
+            }
+            return null;
         }
 
         // L'oggetto afferrato viene mosso in LateUpdate, dopo che il tracking

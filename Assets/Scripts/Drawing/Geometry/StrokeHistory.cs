@@ -20,6 +20,14 @@ namespace MixedRealityProject.Drawing
         {
             public GameObject[] added = None;   // mostrati dall'azione (disegno / pezzi)
             public GameObject[] removed = None; // nascosti dall'azione (gomma)
+
+            // Unione (magnete post-disegno): reparenting di un oggetto sotto un altro.
+            // Forward (esegui/redo): mergeChild → mergeNewParent e si TOGLIE il suo
+            // DrawnItem (il gruppo si afferra come un unico oggetto). Reverse (undo):
+            // mergeChild → mergeOldParent e si RIPRISTINA il DrawnItem.
+            public Transform mergeChild;
+            public Transform mergeOldParent;
+            public Transform mergeNewParent;
         }
 
         static readonly List<Action> undo = new();
@@ -40,6 +48,13 @@ namespace MixedRealityProject.Drawing
         /// </summary>
         public static void PushReplace(GameObject[] removed, GameObject[] added)
             => Add(new Action { removed = removed, added = added });
+
+        /// <summary>
+        /// Unione magnete di un oggetto già disegnato sotto un altro (l'unione è già
+        /// stata applicata dal chiamante). Undo la separa, redo la riunisce.
+        /// </summary>
+        public static void PushMerge(Transform child, Transform oldParent, Transform newParent)
+            => Add(new Action { mergeChild = child, mergeOldParent = oldParent, mergeNewParent = newParent });
 
         static void Add(Action action)
         {
@@ -81,11 +96,36 @@ namespace MixedRealityProject.Drawing
             }
         }
 
-        // Forward (esegui/redo): mostra gli aggiunti, nasconde i rimossi.
-        static bool ApplyForward(Action a) => SetActive(a.added, true) | SetActive(a.removed, false);
+        // Forward (esegui/redo): mostra gli aggiunti, nasconde i rimossi, riunisce.
+        static bool ApplyForward(Action a)
+            => SetActive(a.added, true) | SetActive(a.removed, false) | ApplyMerge(a, true);
 
-        // Reverse (undo): mostra i rimossi, nasconde gli aggiunti.
-        static bool ApplyReverse(Action a) => SetActive(a.removed, true) | SetActive(a.added, false);
+        // Reverse (undo): mostra i rimossi, nasconde gli aggiunti, separa.
+        static bool ApplyReverse(Action a)
+            => SetActive(a.removed, true) | SetActive(a.added, false) | ApplyMerge(a, false);
+
+        // Riapplica/annulla un'unione magnete. forward = unisci (child sotto newParent,
+        // via il suo DrawnItem); reverse = separa (child torna a oldParent, DrawnItem
+        // ripristinato). Ritorna true se ha agito (così l'azione non viene "saltata").
+        static bool ApplyMerge(Action a, bool forward)
+        {
+            if (a.mergeChild == null)
+                return false;
+            var parent = forward ? a.mergeNewParent : a.mergeOldParent;
+            if (forward && parent == null)
+                return false; // bersaglio dell'unione distrutto: non si può rifare
+            a.mergeChild.SetParent(parent, true); // mantiene la posa nel mondo
+            var item = a.mergeChild.GetComponent<DrawnItem>();
+            if (forward)
+            {
+                if (item != null) Object.Destroy(item);
+            }
+            else if (item == null)
+            {
+                a.mergeChild.gameObject.AddComponent<DrawnItem>();
+            }
+            return true;
+        }
 
         static bool SetActive(GameObject[] objs, bool active)
         {

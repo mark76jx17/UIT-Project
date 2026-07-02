@@ -253,25 +253,211 @@ namespace MixedRealityProject.Drawing
         }
 
         /// <summary>
-        /// Riempimento di un anello formato da PIÙ tratti uniti (magnete): concatena i
-        /// contorni dei tratti figli di 'root' e, se l'anello è chiuso, costruisce la
-        /// superficie. Ritorna il fill o null (contorno aperto/degenere → nessun danno).
+        /// Riempimento di un anello formato da PIÙ tratti uniti (col magnete a tempo di
+        /// disegno o unendo oggetti già disegnati): concatena i contorni dei tratti figli
+        /// di 'root' in UN unico anello, CHIUDENDO le piccole fessure (gap-closing), e se
+        /// l'anello si chiude costruisce la superficie. Tollera tratti disegnati in ordine
+        /// e verso qualsiasi. Ritorna il fill o null (anello aperto/degenere → nessun danno).
         /// </summary>
         public static GameObject FillGroup(Transform root, Color color, float closeThreshold)
         {
-            var strokes = root.GetComponentsInChildren<Stroke>();
-            if (strokes.Length < 2)
+            var contour = AssembleGroupContour(root, closeThreshold);
+            if (contour == null)
                 return null;
-            var pts = new List<Vector3>();
-            foreach (var s in strokes)
-                foreach (var p in s.rawPoints)
-                    pts.Add(root.InverseTransformPoint(s.transform.TransformPoint(p)));
-            if (pts.Count < 3 || Vector3.Distance(pts[0], pts[^1]) > closeThreshold)
+            var s = root.GetComponentInChildren<Stroke>();
+            var brushType = s != null ? s.brushType : BrushType.Round;
+            var fill = BuildFillObject(contour, null, color, brushType, selectable: false);
+            if (fill.GetComponent<MeshFilter>() == null) // contorno degenere
+            {
+                Destroy(fill);
                 return null;
-            var fill = FillSurface.Build(pts, BrushMaterials.Get(color, BrushType.Round));
-            if (fill == null)
-                return null;
+            }
             fill.transform.SetParent(root, false);
+            return fill;
+        }
+
+        /// <summary>I tratti del gruppo sotto 'root' formerebbero un anello riempibile?
+        /// Usato per l'anteprima hover, senza costruire la mesh.</summary>
+        public static bool IsGroupFillable(Transform root, float closeThreshold)
+            => AssembleGroupContour(root, closeThreshold) != null;
+
+        /// <summary>
+        /// Concatena i tratti del gruppo sotto 'root' in un unico anello chiuso, nello
+        /// spazio locale di 'root'. Catena greedy: parte da un tratto e attacca ogni volta
+        /// quello con l'estremo più vicino all'estremo libero corrente (entro
+        /// 'joinThreshold', invertendolo se serve). Ritorna l'anello se gli estremi finali
+        /// si richiudono entro la soglia, altrimenti null.
+        /// </summary>
+        static List<Vector3> AssembleGroupContour(Transform root, float joinThreshold)
+        {
+            // Polilinee dei tratti, portate nello spazio locale della radice (saltando
+            // i punti-sfera, i riempimenti e i tratti troppo corti).
+            var lines = new List<List<Vector3>>();
+            foreach (var s in root.GetComponentsInChildren<Stroke>())
+            {
+                if (s.record == null || s.record.isPoint || s.rawPoints.Count < 2)
+                    continue;
+                var line = new List<Vector3>(s.rawPoints.Count);
+                foreach (var p in s.rawPoints)
+                    line.Add(root.InverseTransformPoint(s.transform.TransformPoint(p)));
+                lines.Add(line);
+            }
+            if (lines.Count == 0)
+                return null;
+
+            float joinSqr = joinThreshold * joinThreshold;
+
+            var used = new bool[lines.Count];
+            var chain = new List<Vector3>(lines[0]);
+            used[0] = true;
+            int remaining = lines.Count - 1;
+
+            while (remaining > 0)
+            {
+                Vector3 tail = chain[^1];
+                int best = -1;
+                bool reverse = false;
+                float bestSqr = joinSqr;
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    if (used[i])
+                        continue;
+                    float dStart = (lines[i][0] - tail).sqrMagnitude;
+                    float dEnd = (lines[i][^1] - tail).sqrMagnitude;
+                    if (dStart < bestSqr) { bestSqr = dStart; best = i; reverse = false; }
+                    if (dEnd < bestSqr) { bestSqr = dEnd; best = i; reverse = true; }
+                }
+                if (best < 0)
+                    break; // nessun tratto abbastanza vicino: catena interrotta
+
+                var next = lines[best];
+                if (reverse)
+                    next.Reverse();
+                for (int i = 1; i < next.Count; i++) // salta il punto di giunzione (coincide ~ con la coda)
+                    chain.Add(next[i]);
+                used[best] = true;
+                remaining--;
+            }
+
+            // Anello chiuso? estremi finali entro la soglia.
+            if (chain.Count < 3 || (chain[0] - chain[^1]).sqrMagnitude > joinSqr)
+                return null;
+            return chain;
+        }
+
+        /// <summary>
+        /// Crea un oggetto di riempimento di REGIONE indipendente (vedi FillRegion):
+        /// contorno esterno + eventuali buchi, afferrabile e salvabile a sé. In spazio mondo.
+        /// </summary>
+        public static GameObject MakeCellFill(FillRegion.Region region, Color color)
+            => BuildFillObject(region.outer, region.holes, color, region.brushType, selectable: true);
+
+        /// <summary>Riempimento (con eventuali buchi) da agganciare a un GRUPPO: nessun
+        /// DrawnItem/collider proprio, si afferra dai tratti del gruppo. Il contorno è nello
+        /// spazio locale della radice a cui verrà agganciato.</summary>
+        public static GameObject MakeGroupFill(IReadOnlyList<Vector3> outer,
+            List<List<Vector3>> holes, Color color, BrushType brushType)
+            => BuildFillObject(outer, holes, color, brushType, selectable: false);
+
+        /// <summary>
+        /// Riempimento "col pennello": anelli concentrici (spazio mondo, vedi
+        /// FillRegion.FindRings) disegnati col TIPO di pennello dell'oggetto e col colore dato.
+        /// Ogni anello è un tubo col materiale del pennello. NESSUNO StrokeRecord → non è un
+        /// "muro" per i riempimenti futuri e non si salva (prototipo). DrawnItem + collider di
+        /// presa sull'anello esterno per afferrarlo/cancellarlo.
+        /// </summary>
+        public static GameObject MakeRingFill(List<List<Vector3>> rings, Color color,
+            BrushType brushType, float radius)
+        {
+            var root = new GameObject("Fill");
+            root.AddComponent<DrawnItem>();
+            var material = BrushMaterials.Get(color, brushType);
+            int sides = brushType == BrushType.Ribbon ? 2
+                      : radius < 0.003f ? 6 : radius > 0.008f ? 12 : 8;
+
+            foreach (var ring in rings)
+            {
+                if (ring.Count < 3)
+                    continue;
+                var pts = new List<Vector3>(ring) { ring[0] }; // chiude l'anello
+                var radii = new List<float>(pts.Count);
+                for (int i = 0; i < pts.Count; i++)
+                    radii.Add(radius);
+
+                var mesh = new Mesh { name = "FillRing" };
+                new TubeMesher(mesh, sides).AddRange(pts, radii);
+
+                var child = new GameObject("Ring");
+                child.transform.SetParent(root.transform, false);
+                child.AddComponent<MeshFilter>().sharedMesh = mesh;
+                child.AddComponent<MeshRenderer>().sharedMaterial = material;
+            }
+
+            // Collider di presa lungo l'anello esterno (il primo), per afferrare/cancellare.
+            if (rings.Count > 0)
+                foreach (var p in EverySo(rings[0], 4))
+                {
+                    var node = new GameObject("GrabCollider");
+                    node.transform.SetParent(root.transform, false);
+                    node.transform.position = p;
+                    var col = node.AddComponent<SphereCollider>();
+                    col.isTrigger = true;
+                    col.radius = Mathf.Max(radius * 1.5f, 0.022f);
+                }
+            return root;
+        }
+
+        static IEnumerable<Vector3> EverySo(List<Vector3> pts, int step)
+        {
+            for (int i = 0; i < pts.Count; i += step)
+                yield return pts[i];
+        }
+
+        /// <summary>Ricostruisce una superficie di riempimento dai dati salvati (vedi
+        /// DrawingStore). 'selectable' = riempimento indipendente (con DrawnItem e collider
+        /// di presa); false = riempimento di gruppo (figlio della sua radice).</summary>
+        public static GameObject RebuildFill(IReadOnlyList<Vector3> outer,
+            List<List<Vector3>> holes, Color color, BrushType brushType, bool selectable)
+            => BuildFillObject(outer, holes, color, brushType, selectable);
+
+        // Costruisce la mesh di riempimento (con eventuali buchi) + lo StrokeRecord per
+        // salvarla/ricaricarla. Il fill COPIA il tipo di pennello dell'oggetto (es. Glow →
+        // brilla). Se 'selectable', aggiunge DrawnItem e collider di presa lungo il contorno.
+        static GameObject BuildFillObject(IReadOnlyList<Vector3> outer,
+            List<List<Vector3>> holes, Color color, BrushType brushType, bool selectable)
+        {
+            var pts = new List<Vector3>(outer);
+            bool hasHoles = holes != null && holes.Count > 0;
+            // Il tratteggio su una superficie piatta non ha UV → reso come Round per non sfarfallare.
+            var matType = brushType == BrushType.Dashed ? BrushType.Round : brushType;
+            var material = BrushMaterials.Get(color, matType);
+            var fill = (hasHoles ? FillSurface.BuildWithHoles(pts, holes, material)
+                                 : FillSurface.Build(pts, material))
+                       ?? new GameObject("Fill"); // degenere: GO vuoto (mantiene l'allineamento indici al load)
+
+            var rec = fill.AddComponent<StrokeRecord>();
+            rec.isFill = true;
+            rec.color = color;
+            rec.fillColor = color;
+            rec.brushType = brushType;
+            rec.points.AddRange(pts);
+            if (hasHoles)
+                foreach (var h in holes)
+                    rec.holes.Add(new List<Vector3>(h));
+
+            if (selectable && fill.GetComponent<MeshFilter>() != null)
+            {
+                fill.AddComponent<DrawnItem>();
+                for (int i = 0; i < pts.Count; i += 4) // collider radi sul contorno: presa dal bordo
+                {
+                    var node = new GameObject("GrabCollider");
+                    node.transform.SetParent(fill.transform, false);
+                    node.transform.localPosition = pts[i];
+                    var col = node.AddComponent<SphereCollider>();
+                    col.isTrigger = true;
+                    col.radius = 0.02f;
+                }
+            }
             return fill;
         }
 

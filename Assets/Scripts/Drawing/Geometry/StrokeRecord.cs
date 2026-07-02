@@ -17,5 +17,22 @@ namespace MixedRealityProject.Drawing
         public bool isPoint;
         public bool filled;
         public Color fillColor = Color.white; // colore del riempimento (può differire dal contorno)
+
+        /// <summary>
+        /// True = questo oggetto È una superficie di riempimento di GRUPPO (creata
+        /// unendo più tratti, vedi Stroke.FillGroup): in <see cref="points"/> c'è il
+        /// contorno già assemblato, nello spazio locale del genitore. Si ricostruisce
+        /// al caricamento con Stroke.RebuildFill, senza ripassare dai singoli tratti.
+        /// (I riempimenti del SINGOLO tratto usano invece <see cref="filled"/>.)
+        /// </summary>
+        public bool isFill;
+
+        /// <summary>
+        /// Buchi (contorni interni da lasciare vuoti) di un riempimento di regione, es. la
+        /// ciambella: <see cref="points"/> è il contorno esterno, questi sono i fori.
+        /// Nello stesso spazio di points. NonSerialized: la persistenza passa da DrawingStore
+        /// (JsonUtility non gestisce le liste annidate); qui serve solo a runtime.
+        /// </summary>
+        [System.NonSerialized] public List<List<Vector3>> holes = new();
     }
 }

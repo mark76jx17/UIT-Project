@@ -12,6 +12,7 @@ namespace MixedRealityProject.Drawing
         static readonly MaterialPropertyBlock block = new();
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         static readonly Color EraseTint = new(1f, 0.25f, 0.25f, 1f);
+        static readonly Color MergeTint = new(0.55f, 0.45f, 0.95f, 1f); // accento "magnete"
 
         /// <summary>
         /// Tinge l'oggetto di rosso: anteprima di cosa cancellerà la gomma. Va sempre
@@ -26,6 +27,26 @@ namespace MixedRealityProject.Drawing
             {
                 var baseColor = renderer.sharedMaterial.GetColor(BaseColorId);
                 var tinted = Color.Lerp(baseColor, EraseTint, 0.6f);
+                tinted.a = baseColor.a;
+                block.Clear();
+                block.SetColor(BaseColorId, tinted);
+                renderer.SetPropertyBlock(block);
+            }
+        }
+
+        /// <summary>
+        /// Tinge l'oggetto col colore "magnete" (viola accento): anteprima di cosa
+        /// verrà UNITO al rilascio mentre tieni un altro oggetto vicino. Da rimuovere
+        /// con Clear, come SetEraseHover.
+        /// </summary>
+        public static void SetMergeHover(Transform root)
+        {
+            if (root == null)
+                return;
+            foreach (var renderer in root.GetComponentsInChildren<Renderer>())
+            {
+                var baseColor = renderer.sharedMaterial.GetColor(BaseColorId);
+                var tinted = Color.Lerp(baseColor, MergeTint, 0.6f);
                 tinted.a = baseColor.a;
                 block.Clear();
                 block.SetColor(BaseColorId, tinted);
