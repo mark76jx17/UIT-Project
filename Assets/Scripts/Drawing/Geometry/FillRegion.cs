@@ -17,18 +17,27 @@ namespace MixedRealityProject.Drawing
     /// </summary>
     public static class FillRegion
     {
-        const int GridTarget = 200;      // celle sul lato più lungo del riquadro
-        const int MaxDim = 320;          // tetto sulla dimensione della griglia
-        const float WallHalf = 0.01f;    // semi-spessore delle linee sulla griglia = gap massimo richiudibile (1 cm)
-        const float SimplifyEps = 1.3f;  // Douglas-Peucker (in celle): leviga i gradini del contorno
+        const int GridTarget = 400;      // celle sul lato più lungo del riquadro
+        const int MaxDim = 640;          // tetto sulla dimensione della griglia
+        const float SimplifyEps = 1.0f;  // Douglas-Peucker (in celle): leviga i gradini del contorno
         const int MaxRecords = 64;
         const int MaxRings = 60;         // tetto sugli anelli concentrici (fill "col pennello")
+
+        // Muri SOTTILI: si stampano i tratti spessi 1 cella (giusto quanto basta perché il
+        // flood 4-connesso non trapeli), così l'allagamento si ferma sulla LINEA MEDIANA del
+        // tratto e i suoi angoli restano netti (niente più "opening" morfologico che li
+        // arrotonda). Il tratto visibile, largo il suo raggio, copre il bordo del fill → niente
+        // alone da nascondere con la dilatazione (che infatti è stata rimossa).
 
         // Chiusura fessure: si ALLUNGANO un po' le estremità libere delle linee aperte, così
         // una divisoria che non arriva fino al bordo lo raggiunge e separa le due celle
         // adiacenti (senza ingrossare i muri, che invece "mangerebbero" le celle sottili).
-        const float GapExtend = 0.012f;   // quanto allungare gli estremi liberi (1.2 cm)
+        const float GapExtend = 0.015f;   // quanto allungare gli estremi liberi (1.5 cm)
         const float OpenSpanMin = 0.03f;  // si allunga solo se la linea è lunga almeno così (no puntini)
+        // Coi muri sottili non si "saldano" più le fessure laterali tra tratti separati: si
+        // colma unendo con un segmento sottile ogni estremo libero al più vicino estremo di un
+        // ALTRO tratto entro questa distanza (bridging preciso, senza arrotondare gli angoli).
+        const float BridgeMax = 0.02f;    // massima fessura richiudibile tra estremi (2 cm)
 
         static readonly Collider[] overlapBuffer = new Collider[256];
 
@@ -97,9 +106,11 @@ namespace MixedRealityProject.Drawing
                 return null;
 
             var segs = new List<(Vector2 a, Vector2 b)>();
+            var ends = new List<(Vector2 p, int rec)>();  // estremi liberi (per il bridging)
             float minx = float.MaxValue, miny = float.MaxValue, maxx = float.MinValue, maxy = float.MinValue;
-            foreach (var rec in records)
+            for (int ri = 0; ri < records.Count; ri++)
             {
+                var rec = records[ri];
                 var t = rec.transform;
                 int m = rec.points.Count;
                 Vector2 first = Project(t.TransformPoint(rec.points[0]), seed, u, v);
@@ -117,9 +128,11 @@ namespace MixedRealityProject.Drawing
                 }
 
                 // Linea APERTA e non troppo corta: allunga i due estremi liberi per chiudere
-                // le fessure con il contorno (separa celle che condividono la divisoria).
+                // le fessure con il contorno, e li registra per il bridging tra tratti separati.
                 if (m >= 2 && (last - first).sqrMagnitude > OpenSpanMin * OpenSpanMin)
                 {
+                    ends.Add((first, ri));
+                    ends.Add((last, ri));
                     Vector2 d0 = first - second;
                     if (d0.sqrMagnitude > 1e-8f)
                     {
@@ -137,9 +150,27 @@ namespace MixedRealityProject.Drawing
             if (segs.Count == 0)
                 return null;
 
+            // Bridging: coi muri sottili le fessure laterali tra tratti separati non si saldano
+            // più da sole. Si unisce ogni estremo libero al più vicino estremo di un ALTRO tratto
+            // entro BridgeMax con un segmento sottile (ogni coppia una volta sola) — così una
+            // cornice fatta di tratti staccati resta stagna senza arrotondare gli angoli.
+            float bridgeSqr = BridgeMax * BridgeMax;
+            for (int i = 0; i < ends.Count; i++)
+            {
+                int bestJ = -1; float bestD = bridgeSqr;
+                for (int j = i + 1; j < ends.Count; j++)
+                {
+                    if (ends[j].rec == ends[i].rec) continue;
+                    float d = (ends[j].p - ends[i].p).sqrMagnitude;
+                    if (d < bestD) { bestD = d; bestJ = j; }
+                }
+                if (bestJ >= 0)
+                    segs.Add((ends[i].p, ends[bestJ].p));
+            }
+
             minx = Mathf.Max(minx, -searchRadius); miny = Mathf.Max(miny, -searchRadius);
             maxx = Mathf.Min(maxx, searchRadius); maxy = Mathf.Min(maxy, searchRadius);
-            float margin = WallHalf * 2f + 0.02f;
+            float margin = 0.02f;
             minx -= margin; miny -= margin; maxx += margin; maxy += margin;
             float bw = maxx - minx, bh = maxy - miny;
             if (bw < 1e-4f || bh < 1e-4f)
@@ -156,7 +187,7 @@ namespace MixedRealityProject.Drawing
             }
 
             var wall = new bool[W * H];
-            int tpx = Mathf.Max(1, Mathf.RoundToInt(WallHalf / cell));
+            const int tpx = 1;   // muro sottile: appena stagno per il flood 4-connesso
             foreach (var s in segs)
                 StampSegment(wall, W, H, s.a, s.b, minx, miny, cell, tpx);
 
@@ -170,7 +201,8 @@ namespace MixedRealityProject.Drawing
             var region = new bool[W * H];
             if (!Flood(wall, region, W, H, sx, sy))
                 return null;
-            region = Dilate(region, W, H, tpx);
+            // Niente dilatazione: coi muri sottili il flood arriva già sulla linea mediana del
+            // tratto, che poi lo copre. Dilatare arrotonderebbe di nuovo gli angoli convessi.
 
             Transform root = null;
             bool single = true;
@@ -417,29 +449,6 @@ namespace MixedRealityProject.Drawing
             q.Enqueue(i);
         }
 
-        // Dilatazione binaria: espande la regione di un disco di raggio r (per far arrivare
-        // il riempimento fin sotto le linee, togliendo l'alone tra colore e contorno).
-        static bool[] Dilate(bool[] src, int W, int H, int r)
-        {
-            if (r <= 0) return src;
-            var dst = (bool[])src.Clone();
-            int r2 = r * r;
-            for (int y = 0; y < H; y++)
-                for (int x = 0; x < W; x++)
-                {
-                    if (!src[y * W + x]) continue;
-                    for (int dy = -r; dy <= r; dy++)
-                        for (int dx = -r; dx <= r; dx++)
-                        {
-                            if (dx * dx + dy * dy > r2) continue;
-                            int nx = x + dx, ny = y + dy;
-                            if (nx >= 0 && ny >= 0 && nx < W && ny < H)
-                                dst[ny * W + nx] = true;
-                        }
-                }
-            return dst;
-        }
-
         // Contorni dell'area allagata come anelli ordinati (esterno + buchi), in coordinate
         // di griglia (angoli dei pixel). Segue i "bordi" tra pixel dentro/fuori l'area,
         // orientati con l'area a sinistra, e li concatena in cicli chiusi.
@@ -498,33 +507,52 @@ namespace MixedRealityProject.Drawing
 
         static Vector2 Corner(long key, long stride) => new(key / stride, key % stride);
 
-        // Douglas-Peucker su un anello chiuso (tiene fissi il primo e l'ultimo vertice).
+        // Douglas-Peucker CICLICO su un anello chiuso. Gli ancoraggi (i due vertici più
+        // lontani tra loro) sono scelti in modo indipendente dalla "cucitura" del contorno:
+        // così non nasce l'artefatto al punto di giunzione e la chiusura viene testata come
+        // ogni altro spigolo. DP tiene comunque ogni vertice che devia più di eps, quindi gli
+        // angoli veri (~90°) si conservano; sparisce solo la scalinata sotto-eps.
         static List<Vector2> Simplify(List<Vector2> pts, float eps)
         {
             int n = pts.Count;
             if (n < 4) return pts;
+            Vector2 c = Centroid(pts);
+            int A = 0; float bestA = -1f;
+            for (int i = 0; i < n; i++)
+            { float d = (pts[i] - c).sqrMagnitude; if (d > bestA) { bestA = d; A = i; } }
+            int B = A; float bestB = -1f;
+            for (int i = 0; i < n; i++)
+            { float d = (pts[i] - pts[A]).sqrMagnitude; if (d > bestB) { bestB = d; B = i; } }
+            if (B == A) B = (A + n / 2) % n;
+
             var keep = new bool[n];
-            keep[0] = keep[n - 1] = true;
-            DP(pts, 0, n - 1, eps * eps, keep);
+            keep[A] = keep[B] = true;
+            float eps2 = eps * eps;
+            DP(pts, A, B, eps2, keep);   // arco A→B (indici mod n)
+            DP(pts, B, A, eps2, keep);   // arco B→A (indici mod n)
             var outp = new List<Vector2>();
             for (int i = 0; i < n; i++) if (keep[i]) outp.Add(pts[i]);
             return outp;
         }
 
+        // DP su un arco che va da first a last avvolgendo in avanti (indici mod n).
         static void DP(List<Vector2> pts, int first, int last, float eps2, bool[] keep)
         {
-            if (last <= first + 1) return;
+            int n = pts.Count;
+            int span = (last - first + n) % n;
+            if (span <= 1) return; // niente vertici in mezzo
             Vector2 a = pts[first], b = pts[last];
             Vector2 ab = b - a; float len2 = ab.sqrMagnitude;
             float maxd = -1f; int idx = -1;
-            for (int i = first + 1; i < last; i++)
+            for (int k = 1; k < span; k++)
             {
+                int i = (first + k) % n;
                 Vector2 ap = pts[i] - a;
                 float t = len2 > 1e-9f ? Mathf.Clamp01(Vector2.Dot(ap, ab) / len2) : 0f;
                 float d2 = (pts[i] - (a + t * ab)).sqrMagnitude;
                 if (d2 > maxd) { maxd = d2; idx = i; }
             }
-            if (maxd > eps2 && idx > 0)
+            if (maxd > eps2 && idx >= 0)
             {
                 keep[idx] = true;
                 DP(pts, first, idx, eps2, keep);

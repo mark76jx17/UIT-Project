@@ -138,7 +138,7 @@ namespace MixedRealityProject.Drawing
             if (maxY - minY < 1e-5f)
                 return null;
 
-            int rows = Mathf.Clamp(Mathf.RoundToInt((maxY - minY) / 0.0025f), 24, 300);
+            int rows = Mathf.Clamp(Mathf.RoundToInt((maxY - minY) / 0.0012f), 24, 600);
             float step = (maxY - minY) / rows;
 
             var verts = new List<Vector3>();
