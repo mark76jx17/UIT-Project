@@ -103,7 +103,7 @@ namespace MixedRealityProject.Drawing
                 ["action.redo"]      = "ripeti",
                 ["action.save"]      = "salva",
                 ["action.load"]      = "carica",
-                ["action.clearAll"]  = "cancella tutto",
+                ["action.clearAll"]  = "canc. tutto",
                 ["options"]          = "Opzioni",
                 ["viewShortcuts"]    = "Scorciatoie",
                 ["language"]         = "Lingua",

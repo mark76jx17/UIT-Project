@@ -74,6 +74,7 @@ namespace MixedRealityProject.Drawing
         const int QueueText = 3004;    // etichette TMP
 
         // Dimensioni font (point-size TMP in unità locali metriche: ~0.003 m per unità).
+        const float SmallToggleFont = SliderLabelFont * 0.78f;
         const float ButtonFont = 0.20f;   // Draw/Fill/Erase (riga larga)
         const float ToggleFont = ButtonFont; // Pressure/Mirror/Grid/Snap uguali a Draw/Fill/Erase
         const float SliderLabelFont = 0.13f; // label degli slider: piccola ma leggibile
@@ -94,6 +95,11 @@ namespace MixedRealityProject.Drawing
         Material[] brushPreviewMats; // anteprime tratto: la selezionata si tinge col colore corrente
         Renderer[] recentSwatches;
         readonly List<System.Action> toggleSync = new();
+
+        readonly List<GameObject> drawOnlyControls = new();
+        GameObject drawOnlyMainDim;
+        GameObject drawOnlyBrushDim;
+        bool lastDrawOnlyEnabled = true;
 
         // Sotto-pannello "Options" (impostazioni). Vive a parte rispetto a `panel` così un
         // Rebuild del pannello principale (es. al toggle mancino) non distrugge il controllo
@@ -628,6 +634,8 @@ namespace MixedRealityProject.Drawing
             // Toggle del sotto-pannello Options (lista separata, non azzerata dal Rebuild).
             foreach (var sync in optionsSync)
                 sync();
+
+            SyncDrawOnlyAvailability();
         }
 
         void RefreshRecents()
@@ -707,6 +715,7 @@ namespace MixedRealityProject.Drawing
             float wheelMaxZoom = edgeDist / (wheelDiameter * 0.5f) * wheelZoomMargin;
             colorWheel.Build(wheelDiameter, PanelColor, wheelMaxZoom);
             colorWheel.SetProximityTarget(Brush != null ? Brush.Tip : null);
+            RegisterDrawOnly(wheel);
 
             // Anteprima/checker: stessa altezza della ruota, ma centrata esattamente a
             // METÀ tra il centro della ruota e il centro dello slider luminosità. La cella
@@ -719,12 +728,15 @@ namespace MixedRealityProject.Drawing
             previewGO.transform.SetParent(panel.transform, false);
             previewGO.transform.localPosition = new Vector3(previewX, elemY, previewCell.Center.z);
             previewGO.AddComponent<ColorPreview>().Build(new Vector2(previewCell.Size.x * 0.9f, colH));
+            RegisterDrawOnly(previewGO);
 
             // Slider luminosità: stessa altezza e centro; label "Bright" nella fascetta in alto.
             var bright = new GameObject("BrightnessSlider");
             bright.transform.SetParent(panel.transform, false);
             bright.transform.localPosition = new Vector3(brightCol.Center.x, elemY, brightCol.Center.z);
             bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, colH));
+            RegisterDrawOnly(bright);
+            
             MakeLabel(panel.transform, Localization.Get("brightness"),
                 new Vector3(brightCol.Center.x, wheelCell.Center.y + wheelCell.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
                 new Vector2(brightCol.Size.x, brightLabelH), SliderLabelFont, TextAlignmentOptions.Center, autoFit: true);
@@ -744,6 +756,7 @@ namespace MixedRealityProject.Drawing
                         if (idx < r.Count) StrokeSettings.SetColor(r[idx]);
                     });
                 recentSwatches[i] = sw.GetComponent<Renderer>();
+                RegisterDrawOnly(sw);
             }
             layout.Gap(0.007f);
 
@@ -761,6 +774,7 @@ namespace MixedRealityProject.Drawing
             alpha.transform.localPosition = alphaSliderPos;
 
             alpha.AddComponent<AlphaSlider>().Build(new Vector2(alphaCell.Size.x, 0.016f));
+            RegisterDrawOnly(alpha);
 
             // separator
             layout.Gap(0.008f);
@@ -792,6 +806,7 @@ namespace MixedRealityProject.Drawing
             size.transform.localPosition = sizeSliderPos;
 
             size.AddComponent<SizeSlider>().Build(new Vector2(sizeCell.Size.x, 0.018f));
+            RegisterDrawOnly(size);
 
             // separator
             layout.Gap(0.008f);
@@ -806,18 +821,17 @@ namespace MixedRealityProject.Drawing
             var toggleRow = layout.Row(0.034f);
             var toggleCells = toggleRow.Split(3);
 
-            MakeToggleButton("mirror", toggleCells[0],
+            MakeIconToggleButton("mirror", "mirror-mode", toggleCells[0],
                 () => Mirror.Enabled,
                 () => Mirror.Toggle(Head != null ? Head.transform : transform));
 
-            MakeToggleButton("grid", toggleCells[1],
+            MakeIconToggleButton("grid", "grid-mode", toggleCells[1],
                 () => ReferenceGrid.Enabled,
                 () => ReferenceGrid.Toggle(Head != null ? Head.transform : transform));
 
-            MakeToggleButton("line", toggleCells[2],
+            MakeIconToggleButton("line", "line-mode", toggleCells[2],
                 () => StrokeSettings.SnapAxis,
                 () => StrokeSettings.SnapAxis = !StrokeSettings.SnapAxis);
-
 
             // ---------- SEPARATOR ----------
             layout.Gap(0.006f);
@@ -856,6 +870,14 @@ namespace MixedRealityProject.Drawing
                 () => StrokeSettings.Tool = ToolMode.Fill);
 
             BuildEraseDeleteButtons(eraseDeleteCell);
+            
+            drawOnlyMainDim = MakeDisabledOverlay(
+                panel.transform,
+                "DrawOnlyMainDisabled",
+                new Vector3(0f, 0.047f, -0.020f),
+                new Vector2(panelSize.x - pad * 1.2f, 0.365f),
+                0.018f
+            );
 
         }
 
@@ -867,6 +889,10 @@ namespace MixedRealityProject.Drawing
             if (panel != null)
                 Destroy(panel);
             toggleSync.Clear();
+            drawOnlyControls.Clear();
+            drawOnlyMainDim = null;
+            drawOnlyBrushDim = null;
+            lastDrawOnlyEnabled = true;
             lastTool = (ToolMode)(-1);
             lastType = -1;
             BuildPanel();
@@ -886,6 +912,10 @@ namespace MixedRealityProject.Drawing
             if (shortcutsPanel != null) Destroy(shortcutsPanel);
             toggleSync.Clear();
             optionsSync.Clear(); // i sync di Options puntano a renderer ora distrutti
+            drawOnlyControls.Clear();
+            drawOnlyMainDim = null;
+            drawOnlyBrushDim = null;
+            lastDrawOnlyEnabled = true;
             lastTool = (ToolMode)(-1);
             lastType = -1;
             BuildPanel();
@@ -941,24 +971,24 @@ namespace MixedRealityProject.Drawing
 
             // Header: titolo a sinistra + linea separatrice accent sotto.
             MakeLabel(optionsPanel.transform, Localization.Get("options"),
-                new Vector3(-0.006f, top - 0.026f, -0.004f),
-                new Vector2(size.x - 0.06f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
+            new Vector3(-0.006f, top - 0.026f, -0.004f),
+            new Vector2(size.x - 0.06f, 0.03f), SliderLabelFont * 1.38f, TextAlignmentOptions.Left);
 
             MakeRounded(optionsPanel.transform, "HeaderSep",
-                new Vector3(0f, top - 0.05f, -0.004f),
-                new Vector2(size.x - 0.05f, 0.0035f), 0.0017f, AccentColor, QueueControl);
+                new Vector3(-0.016f, top - 0.05f, -0.004f),
+                new Vector2(size.x - 0.085f, 0.0035f), 0.0017f, AccentColor, QueueControl);
 
             // Bottone di chiusura (✕) in alto a destra: serve perché, da modale, il bottone
             // "Options" nella striscia azioni non è più premibile (è "sotto" il menu).
             var closeCell = new Cell
             {
-                Center = new Vector3(size.x * 0.5f - 0.026f, top - 0.026f, -0.004f),
-                Size = new Vector2(0.034f, 0.034f)
+                Center = new Vector3(size.x * 0.5f - 0.027f, top - 0.027f, -0.004f),
+                Size = new Vector2(0.038f, 0.038f)
             };
             var close = MakeRoundedButton(optionsPanel.transform, "OptionsClose",
-                closeCell.Center, closeCell.Size, 0.01f, ButtonColor, CloseOptionsPanel);
-            close.GetComponent<PaletteButton>().SilentPress = true; // il suono lo dà MenuToggle
-            MakeIconImage(close.transform, "close", new Vector3(0f, 0f, -0.005f), closeCell.Size.x * 0.6f);
+                closeCell.Center, closeCell.Size, 0.011f, ButtonColor, CloseOptionsPanel);
+            close.GetComponent<PaletteButton>().SilentPress = true;
+            MakeIconImage(close.transform, "close", new Vector3(0f, 0f, -0.005f), closeCell.Size.x * 0.66f);
 
             // Voce: handedness come controllo SEGMENTATO a due segmenti (mano sinistra |
             // mano destra). Esattamente un segmento è attivo: quello della mano corrente è
@@ -1020,8 +1050,12 @@ namespace MixedRealityProject.Drawing
             float scIcon = Mathf.Min(scCell.Size.y * 0.6f, 0.03f);
             float scIconX = -scCell.Size.x * 0.5f + scIcon * 0.5f + 0.012f;
             MakeIconImage(sc.transform, "bolt", new Vector3(scIconX, 0f, -0.005f), scIcon);
-            MakeLabel(sc.transform, Localization.Get("viewShortcuts"), new Vector3(0f, 0f, -0.004f),
-                scCell.Size, ToggleFont, TextAlignmentOptions.Center, autoFit: true);
+            MakeLabel(sc.transform, Localization.Get("viewShortcuts"),
+                new Vector3(0.012f, 0f, -0.004f),
+                new Vector2(scCell.Size.x - 0.048f, scCell.Size.y),
+                SliderLabelFont * 1.38f,
+                TextAlignmentOptions.Center,
+                autoFit: true);
 
             // Voce: lingua della UI come dropdown (etichetta a sinistra + selettore a destra).
             // Il selettore si popola da Localization.Languages e mostra la lingua corrente da
@@ -1181,7 +1215,7 @@ namespace MixedRealityProject.Drawing
             // Pannello ampio: le scorciatoie usano un font pari alle altre label e devono
             // riempire tutta l'area utile, quindi serve spazio in larghezza e altezza. La
             // posizione finale (accanto al bottone ellipsi) è data da PositionMenus.
-            var size = new Vector2(0.68f, 0.58f);
+            var size = new Vector2(0.60f, 0.48f);
             shortcutsSize = size;
             shortcutsPanel = MakeRounded(transform, "ShortcutsPanel", Vector3.zero,
                 size, 0.026f, PanelColor, QueuePanel);
@@ -1193,21 +1227,24 @@ namespace MixedRealityProject.Drawing
             // Header: icona saetta + titolo, linea accent, X di chiusura.
             MakeIconImage(shortcutsPanel.transform, "bolt",
                 new Vector3(-size.x * 0.5f + 0.03f, top - 0.03f, -0.005f), 0.028f);
+            
             MakeLabel(shortcutsPanel.transform, Localization.Get("shortcuts"),
                 new Vector3(-size.x * 0.5f + 0.26f, top - 0.03f, -0.004f),
-                new Vector2(0.32f, 0.03f), SliderLabelFont * 1.25f, TextAlignmentOptions.Left);
+                new Vector2(0.32f, 0.03f), SliderLabelFont * 1.38f, TextAlignmentOptions.Left);
+            
             MakeRounded(shortcutsPanel.transform, "HeaderSep",
-                new Vector3(0f, top - 0.058f, -0.004f),
-                new Vector2(size.x - 0.05f, 0.0035f), 0.0017f, AccentColor, QueueControl);
+                new Vector3(-0.016f, top - 0.058f, -0.004f),
+                new Vector2(size.x - 0.085f, 0.0035f), 0.0017f, AccentColor, QueueControl);
+            
             var closeCell = new Cell
             {
-                Center = new Vector3(size.x * 0.5f - 0.03f, top - 0.03f, -0.004f),
-                Size = new Vector2(0.036f, 0.036f)
+                Center = new Vector3(size.x * 0.5f - 0.027f, top - 0.027f, -0.004f),
+                Size = new Vector2(0.038f, 0.038f)
             };
             var close = MakeRoundedButton(shortcutsPanel.transform, "ShortcutsClose",
-                closeCell.Center, closeCell.Size, 0.01f, ButtonColor, CloseShortcutsPanel);
-            close.GetComponent<PaletteButton>().SilentPress = true; // il suono lo dà ShortcutsToggle
-            MakeIconImage(close.transform, "close", new Vector3(0f, 0f, -0.005f), closeCell.Size.x * 0.6f);
+                closeCell.Center, closeCell.Size, 0.011f, ButtonColor, CloseShortcutsPanel);
+            close.GetComponent<PaletteButton>().SilentPress = true;
+            MakeIconImage(close.transform, "close", new Vector3(0f, 0f, -0.005f), closeCell.Size.x * 0.66f);
 
             // UN solo schema (line-art con entrambi i controller, importato e schiarito),
             // centrato; attorno le etichette delle scorciatoie con linea-guida e anello sul
@@ -1219,8 +1256,8 @@ namespace MixedRealityProject.Drawing
             BuildSchematicDiagram(leftRole, rightRole, top);
 
             MakeLabel(shortcutsPanel.transform, Localization.Get("shortcuts.hint"),
-                new Vector3(0f, -top + 0.016f, -0.004f),
-                new Vector2(size.x - 0.04f, 0.02f), SliderLabelFont * 0.78f, TextAlignmentOptions.Center);
+                new Vector3(0f, -top + 0.020f, -0.004f),
+                new Vector2(size.x - 0.04f, 0.026f), SliderLabelFont * 0.95f, TextAlignmentOptions.Center);
 
             SetLayerRecursively(shortcutsPanel, PaletteLayer);
             shortcutsPanel.SetActive(false);
@@ -1250,7 +1287,7 @@ namespace MixedRealityProject.Drawing
         // blocchi "Thumbstick" ai lati esterni, Y/B sopra i rispettivi controller, Menu sotto.
         void BuildSchematicDiagram(string leftRole, string rightRole, float top)
         {
-            const float diagW = 0.34f;
+            const float diagW = 0.30f;
             float diagH = diagW * 371f / 800f; // proporzioni dello schema
             const float cy = -0.01f;
             var tex = Resources.Load<Texture2D>("Controllers/schematic");
@@ -1278,7 +1315,7 @@ namespace MixedRealityProject.Drawing
                 Leader(anchor, new Vector3(anchor.x, endY, -0.0052f));
                 AnchorDot(anchor, 0.009f);
                 MakeLabel(shortcutsPanel.transform, text, new Vector3(anchor.x, ly, -0.005f),
-                    new Vector2(0.24f, 0.022f), SliderLabelFont * 0.85f, TextAlignmentOptions.Center);
+                    new Vector2(0.24f, 0.026f), SliderLabelFont * 0.95f, TextAlignmentOptions.Center);
             }
 
             // Blocchi Thumbstick ai lati esterni.
@@ -1315,7 +1352,7 @@ namespace MixedRealityProject.Drawing
             var align = toRight ? TextAlignmentOptions.Left : TextAlignmentOptions.Right;
             float cx = toRight ? edgeX + w * 0.5f : edgeX - w * 0.5f;
             MakeLabel(shortcutsPanel.transform, text, new Vector3(cx, 0f, -0.005f),
-                new Vector2(w, 0.13f), SliderLabelFont * 0.8f, align);
+                new Vector2(w, 0.14f), SliderLabelFont * 0.88f, align);
             Leader(stickAnchor, new Vector3(edgeX, 0.01f, -0.0052f));
             AnchorDot(stickAnchor, 0.009f);
         }
@@ -1342,6 +1379,58 @@ namespace MixedRealityProject.Drawing
                 new Vector2(len, 0.0018f), 0.0009f, LeaderColor, QueueControl);
             float ang = Mathf.Atan2(to.y - from.y, to.x - from.x) * Mathf.Rad2Deg;
             bar.transform.localRotation = Quaternion.Euler(0f, 0f, ang);
+        }
+
+        void RegisterDrawOnly(GameObject go)
+        {
+            if (go != null && !drawOnlyControls.Contains(go))
+                drawOnlyControls.Add(go);
+        }
+
+        void SyncDrawOnlyAvailability()
+        {
+            bool enabled = StrokeSettings.Tool == ToolMode.Pen;
+
+            if (enabled == lastDrawOnlyEnabled)
+                return;
+
+            lastDrawOnlyEnabled = enabled;
+
+            foreach (var root in drawOnlyControls)
+            {
+                if (root == null)
+                    continue;
+
+                foreach (var col in root.GetComponentsInChildren<Collider>(true))
+                    col.enabled = enabled;
+            }
+
+            if (drawOnlyMainDim != null)
+                drawOnlyMainDim.SetActive(!enabled);
+
+            if (drawOnlyBrushDim != null)
+                drawOnlyBrushDim.SetActive(!enabled);
+        }
+
+        GameObject MakeDisabledOverlay(Transform parent, string name, Vector3 localPos, Vector2 size, float corner)
+        {
+            var go = MakeRounded(
+                parent,
+                name,
+                localPos,
+                size,
+                corner,
+                new Color(0.02f, 0.02f, 0.025f, 0.58f),
+                QueueText,
+                opaque: false
+            );
+
+            var col = go.AddComponent<BoxCollider>();
+            col.isTrigger = true;
+            col.size = new Vector3(size.x, size.y, 0.012f);
+
+            go.SetActive(false);
+            return go;
         }
 
         static void SetLayerRecursively(GameObject go, int layer)
@@ -1381,6 +1470,14 @@ namespace MixedRealityProject.Drawing
             var strip = MakeRounded(panel.transform, "BrushStrip", new Vector3(stripX, 0f, 0f),
                 stripSize, 0.016f, PanelColor, QueuePanel);
 
+            drawOnlyBrushDim = MakeDisabledOverlay(
+                strip.transform,
+                "BrushStripDisabled",
+                new Vector3(0f, 0f, -0.020f),
+                stripSize,
+                0.016f
+            );
+
             brushButtons = new Renderer[n];
             brushPreviewMats = new Material[n];
             float y0 = (contentH - bSize) * 0.5f;
@@ -1400,6 +1497,7 @@ namespace MixedRealityProject.Drawing
                 brushPreviewMats[i] = MakeTexQuad(b.transform, BrushPreview.Get(type),
                     new Vector3(0f, -bSize * 0.13f, -0.004f), new Vector2(bSize * 0.78f, bSize * 0.40f));
                 brushButtons[i] = b.GetComponent<Renderer>();
+                RegisterDrawOnly(b);
                 if (off)
                     b.SetActive(false); // nascosto e non consuma uno slot visibile
                 else
@@ -1611,6 +1709,54 @@ namespace MixedRealityProject.Drawing
             return b.GetComponent<Renderer>();
         }
 
+        void MakeIconToggleButton(string labelKey, string iconName, Cell cell, System.Func<bool> isOn, System.Action onToggle)
+        {
+            var b = MakeRoundedButton(panel.transform, labelKey + "Toggle", cell.Center, cell.Size,
+                Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
+
+            // Mirror/Grid/Line sono controlli Draw-only:
+            // quando non sei su Draw, SyncDrawOnlyAvailability disabilita i collider.
+            RegisterDrawOnly(b);
+
+            b.GetComponent<PaletteButton>().ToggleState = isOn;
+
+            float iconSize = Mathf.Min(cell.Size.y * 0.58f, 0.020f);
+
+            // Icona a sinistra.
+            MakeIconImage(
+                b.transform,
+                iconName,
+                new Vector3(-cell.Size.x * 0.24f, 0f, -0.005f),
+                iconSize
+            );
+
+            // Testo più piccolo a destra dell'icona.
+            MakeLabel(
+                b.transform,
+                Localization.Get(labelKey),
+                new Vector3(cell.Size.x * 0.16f, 0f, -0.004f),
+                new Vector2(cell.Size.x * 0.58f, cell.Size.y),
+                SmallToggleFont,
+                TextAlignmentOptions.Center,
+                autoFit: true
+            );
+
+            var r = b.GetComponent<Renderer>();
+
+            bool initialized = false;
+            bool last = false;
+            toggleSync.Add(() =>
+            {
+                bool on = isOn();
+                if (initialized && on == last)
+                    return;
+
+                initialized = true;
+                last = on;
+                r.material.SetColor(BaseColorId, on ? AccentColor : ButtonColor);
+            });
+        }
+
         // Toggle compatto: bottone che si illumina (accent) quando attivo. Niente pillola.
         // I toggle del pannello principale usano panel.transform + toggleSync (svuotato dal
         // Rebuild); il sotto-pannello Options passa il proprio parent e la propria lista.
@@ -1624,6 +1770,12 @@ namespace MixedRealityProject.Drawing
         {
             var b = MakeRoundedButton(parent, labelKey + "Toggle", cell.Center, cell.Size,
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
+
+            if (parent == panel.transform &&
+                (labelKey == "pressure" || labelKey == "mirror" || labelKey == "grid" || labelKey == "line"))
+            {
+                RegisterDrawOnly(b);
+            }
             // È un toggle: il feedback userà il suono on/off in base al nuovo stato.
             b.GetComponent<PaletteButton>().ToggleState = isOn;
             MakeLabel(b.transform, Localization.Get(labelKey), new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center, autoFit: true);

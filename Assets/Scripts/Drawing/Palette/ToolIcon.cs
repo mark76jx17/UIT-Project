@@ -26,6 +26,9 @@ namespace MixedRealityProject.Drawing
                 case "pencil": Pencil(); break;
                 case "droplet": Droplet(); break;
                 case "eraser": Eraser(); break;
+                case "mirror-mode": MirrorMode(); break;
+                case "grid-mode": GridMode(); break;
+                case "line-mode": LineMode(); break;
                 case "undo": Arc(false); break;
                 case "redo": Arc(true); break;
                 case "save": SaveLoad(down: true); break;
@@ -104,6 +107,61 @@ namespace MixedRealityProject.Drawing
             Disc(new(-0.34f, -0.42f), 0.052f);
             Disc(new(-0.05f, -0.52f), 0.046f);
             Disc(new(0.24f, -0.46f), 0.050f);
+        }
+
+        static void MirrorMode()
+        {
+            // Piano verticale centrale.
+            Seg(new Vector2(0f, -0.72f), new Vector2(0f, 0.72f), 0.055f);
+
+            // Curva sinistra e curva destra speculare.
+            const int N = 14;
+            Vector2 prevL = Vector2.zero;
+            Vector2 prevR = Vector2.zero;
+
+            for (int i = 0; i <= N; i++)
+            {
+                float t = i / (float)N;
+                float y = Mathf.Lerp(-0.52f, 0.52f, t);
+
+                // Si allontana dal piano al centro e torna verso il piano agli estremi.
+                float bow = Mathf.Sin(t * Mathf.PI);
+                float x = 0.14f + bow * 0.34f;
+
+                Vector2 pL = new Vector2(-x, y);
+                Vector2 pR = new Vector2( x, y);
+
+                if (i > 0)
+                {
+                    Seg(prevL, pL, 0.070f);
+                    Seg(prevR, pR, 0.070f);
+                }
+
+                prevL = pL;
+                prevR = pR;
+            }
+        }
+
+        static void GridMode()
+        {
+            const float r = 0.58f;
+            const float th = 0.055f;
+
+            // 3 verticali
+            Seg(new Vector2(-r, -r), new Vector2(-r, r), th);
+            Seg(new Vector2(0f, -r), new Vector2(0f, r), th);
+            Seg(new Vector2(r, -r), new Vector2(r, r), th);
+
+            // 3 orizzontali
+            Seg(new Vector2(-r, -r), new Vector2(r, -r), th);
+            Seg(new Vector2(-r, 0f), new Vector2(r, 0f), th);
+            Seg(new Vector2(-r, r), new Vector2(r, r), th);
+        }
+
+        static void LineMode()
+        {
+            // Linea orizzontale dritta e un po' spessa.
+            Seg(new Vector2(-0.62f, 0f), new Vector2(0.62f, 0f), 0.095f);
         }
 
         static void Arc(bool redo)
