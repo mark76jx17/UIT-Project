@@ -56,6 +56,23 @@ namespace MixedRealityProject.Drawing
             return point - 2f * Vector3.Dot(point - p, n) * n;
         }
 
+        public static Vector3 Project(Vector3 point)
+        {
+            Vector3 p = visual != null ? visual.transform.position : planePoint;
+            Vector3 n = visual != null ? visual.transform.forward : planeNormal;
+            return point - Vector3.Dot(point - p, n) * n;
+        }
+
+        public static bool TryProject(Vector3 point, float maxDistance, out Vector3 projected)
+        {
+            Vector3 p = visual != null ? visual.transform.position : planePoint;
+            Vector3 n = visual != null ? visual.transform.forward : planeNormal;
+
+            float d = Vector3.Dot(point - p, n);
+            projected = point - d * n;
+            return Mathf.Abs(d) <= maxDistance;
+        }
+
         static GameObject BuildVisual()
         {
             var go = new GameObject("MirrorPlane");

@@ -54,6 +54,10 @@ namespace MixedRealityProject.Drawing
         [Tooltip("Se il tratto inizia entro questa distanza da un oggetto disegnato, ci si aggancia e diventano un unico oggetto.")]
         [SerializeField] float snapRadius = 0.025f;
 
+        [Header("Mirror")]
+        [Tooltip("Se inizio/fine tratto sono entro questa distanza dal piano specchio, vengono agganciati esattamente al piano.")]
+        [SerializeField] float mirrorPlaneSnapRadius = 0.025f;
+
         [Header("Fill (secchiello)")]
         [Tooltip("Distanza massima tra gli estremi perché un tratto sia 'chiuso' e riempibile.")]
         [SerializeField] float fillCloseThreshold = 0.05f;
@@ -108,6 +112,7 @@ namespace MixedRealityProject.Drawing
         bool pressed;
         float currentRadius;
         Transform mergeTarget;
+        bool mirrorStartOnPlane;
 
         bool fillConsumed;     // un solo riempimento per pressione del trigger
         Transform fillHover;   // tratto chiuso attualmente evidenziato in modo Fill
@@ -434,10 +439,28 @@ namespace MixedRealityProject.Drawing
             currentRadius = TriggerToRadius(trigger);
 
             mergeTarget = null;
+            mirrorStartOnPlane = false;
+
+            // Se parto vicino al piano specchio, parto ESATTAMENTE sul piano.
+            // Questo evita il micro-gap tra stroke originale e stroke speculare.
+            if (Mirror.Enabled && Mirror.TryProject(position, mirrorPlaneSnapRadius, out var mirrorStart))
+            {
+                position = mirrorStart;
+                mirrorStartOnPlane = true;
+            }
+
             if (mergeNearbyStrokes && FindNearbyItem(position, out var target, out var snapped))
             {
                 mergeTarget = target;
                 position = snapped; // il tratto parte attaccato all'oggetto esistente
+
+                // Se lo snap al tratto vicino è comunque vicino al piano, riallinealo al piano.
+                if (Mirror.Enabled && Mirror.TryProject(position, mirrorPlaneSnapRadius, out var projectedSnapped))
+                {
+                    position = projectedSnapped;
+                    mirrorStartOnPlane = true;
+                }
+
                 // Snap-merge: impulso distintivo (più lungo e forte) per conferma tattile
                 HapticPulse(hapticSnapDuration, frequency: 0.8f, amplitude: 0.8f);
             }
@@ -518,14 +541,18 @@ namespace MixedRealityProject.Drawing
             // Fine tratto: impulso breve di conferma
             HapticPulse(hapticStrokeDuration, frequency: 0.3f, amplitude: 0.4f);
 
-            // Tratto sulla carta: anche l'ultima posizione va proiettata, o il confronto
-            // del tap (posizione vs pressPosition proiettata) misurerebbe la distanza
-            // punta-foglio invece del movimento reale.
-            if (lineOnSheet)
-                position = ReferenceGrid.ProjectClamped(position);
+            bool mirrorEndOnPlane = false;
+            Vector3 finalPosition = position;
+
+            // Se finisco vicino al piano specchio, l'ultimo punto viene agganciato al piano.
+            if (Mirror.Enabled && Mirror.TryProject(finalPosition, mirrorPlaneSnapRadius, out var mirrorEnd))
+            {
+                finalPosition = mirrorEnd;
+                mirrorEndOnPlane = true;
+            }
 
             bool isTap = Time.time - pressTime <= tapMaxDuration
-                         && Vector3.Distance(position, pressPosition) <= tapMaxMovement;
+                        && Vector3.Distance(finalPosition, pressPosition) <= tapMaxMovement;
 
             GameObject finished;
             GameObject mirroredObj = null;
@@ -541,6 +568,18 @@ namespace MixedRealityProject.Drawing
             }
             else
             {
+                // Se il tratto finisce sul piano mirror, aggiungi un ultimo punto esatto sul piano.
+                // Così originale e speculare condividono davvero l'estremo finale.
+                // Lo facciamo solo per stroke normali, non per lineStroke: le linee elastiche
+                // hanno già i loro due estremi gestiti separatamente.
+                if (!lineStroke && mirrorEndOnPlane && Vector3.Distance(current.LastPoint, finalPosition) > 0.001f)
+                {
+                    current.AddPoint(finalPosition, currentRadius);
+
+                    if (mirrored != null)
+                        mirrored.AddPoint(Mirror.Reflect(finalPosition), currentRadius);
+                }
+
                 // Le linee elastiche chiudono con FinishLine: aggiunge i collider di presa
                 // lungo il segmento (i punti non passano da AddPoint che li semina).
                 if (lineStroke) current.FinishLine(); else current.Finish();
@@ -563,14 +602,33 @@ namespace MixedRealityProject.Drawing
             }
 
             // Tratto + eventuale gemello speculare come UN solo passo di undo.
-            if (mirroredObj != null)
+            bool mirrorSelfMerged = false;
+
+            // Caso speciale: ho disegnato da un punto del piano specchio a un altro punto del piano.
+            // Originale e speculare devono diventare un unico oggetto logico.
+            if (mirroredObj != null && mirrorStartOnPlane && mirrorEndOnPlane)
+            {
+                mirroredObj.transform.SetParent(finished.transform, true);
+
+                var item = mirroredObj.GetComponent<DrawnItem>();
+                if (item != null)
+                    Destroy(item);
+
+                mirrorSelfMerged = true;
+            }
+
+            // Tratto + eventuale gemello speculare come UN solo passo di undo.
+            // Se li abbiamo fusi in gerarchia, basta pushare la radice `finished`.
+            if (mirroredObj != null && !mirrorSelfMerged)
                 StrokeHistory.PushGroup(finished, mirroredObj);
             else
                 StrokeHistory.Push(finished);
+
             StrokeSettings.PushRecentColor(StrokeSettings.BaseColor); // colore appena usato → recenti
             current = null;
             mirrored = null;
             mergeTarget = null;
+            mirrorStartOnPlane = false;
         }
 
         void DeleteAt(Vector3 position)

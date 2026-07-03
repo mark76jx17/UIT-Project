@@ -96,10 +96,21 @@ namespace MixedRealityProject.Drawing
         Renderer[] recentSwatches;
         readonly List<System.Action> toggleSync = new();
 
-        readonly List<GameObject> drawOnlyControls = new();
-        GameObject drawOnlyMainDim;
-        GameObject drawOnlyBrushDim;
-        bool lastDrawOnlyEnabled = true;
+        readonly List<GameObject> colorControls = new();
+        readonly List<GameObject> sizeControls = new();
+        readonly List<GameObject> penOnlyControls = new();
+        readonly List<GameObject> brushOnlyControls = new();
+
+        GameObject colorDim;
+        GameObject pressureDim;
+        GameObject sizeDim;
+        GameObject guidesDim;
+        GameObject brushDim;
+
+        bool lastColorEnabled = true;
+        bool lastSizeEnabled = true;
+        bool lastPenOnlyEnabled = true;
+        bool lastBrushEnabled = true;
 
         // Sotto-pannello "Options" (impostazioni). Vive a parte rispetto a `panel` così un
         // Rebuild del pannello principale (es. al toggle mancino) non distrugge il controllo
@@ -506,7 +517,7 @@ namespace MixedRealityProject.Drawing
             foreach (var sync in optionsSync)
                 sync();
 
-            SyncDrawOnlyAvailability();
+            SyncToolControlAvailability();
         }
 
         void RefreshRecents()
@@ -586,7 +597,7 @@ namespace MixedRealityProject.Drawing
             float wheelMaxZoom = edgeDist / (wheelDiameter * 0.5f) * wheelZoomMargin;
             colorWheel.Build(wheelDiameter, PanelColor, wheelMaxZoom);
             colorWheel.SetProximityTarget(Brush != null ? Brush.Tip : null);
-            RegisterDrawOnly(wheel);
+            RegisterColorControl(wheel);
 
             // Anteprima/checker: stessa altezza della ruota, ma centrata esattamente a
             // METÀ tra il centro della ruota e il centro dello slider luminosità. La cella
@@ -599,14 +610,14 @@ namespace MixedRealityProject.Drawing
             previewGO.transform.SetParent(panel.transform, false);
             previewGO.transform.localPosition = new Vector3(previewX, elemY, previewCell.Center.z);
             previewGO.AddComponent<ColorPreview>().Build(new Vector2(previewCell.Size.x * 0.9f, colH));
-            RegisterDrawOnly(previewGO);
+            RegisterColorControl(previewGO);
 
             // Slider luminosità: stessa altezza e centro; label "Bright" nella fascetta in alto.
             var bright = new GameObject("BrightnessSlider");
             bright.transform.SetParent(panel.transform, false);
             bright.transform.localPosition = new Vector3(brightCol.Center.x, elemY, brightCol.Center.z);
             bright.AddComponent<BrightnessSlider>().Build(new Vector2(0.016f, colH));
-            RegisterDrawOnly(bright);
+            RegisterColorControl(bright);
             
             MakeLabel(panel.transform, Localization.Get("brightness"),
                 new Vector3(brightCol.Center.x, wheelCell.Center.y + wheelCell.Size.y * 0.5f - brightLabelH * 0.5f, -0.006f),
@@ -627,7 +638,7 @@ namespace MixedRealityProject.Drawing
                         if (idx < r.Count) StrokeSettings.SetColor(r[idx]);
                     });
                 recentSwatches[i] = sw.GetComponent<Renderer>();
-                RegisterDrawOnly(sw);
+                RegisterColorControl(sw);
             }
             layout.Gap(0.007f);
 
@@ -645,7 +656,18 @@ namespace MixedRealityProject.Drawing
             alpha.transform.localPosition = alphaSliderPos;
 
             alpha.AddComponent<AlphaSlider>().Build(new Vector2(alphaCell.Size.x, 0.016f));
-            RegisterDrawOnly(alpha);
+            RegisterColorControl(alpha);
+
+            float colorTop = wheelCell.Center.y + wheelCell.Size.y * 0.5f;
+            float colorBottom = alphaCell.Center.y - alphaCell.Size.y * 0.5f;
+
+            colorDim = MakeDisabledOverlay(
+                panel.transform,
+                "ColorDisabled",
+                new Vector3(0f, (colorTop + colorBottom) * 0.5f, -0.020f),
+                new Vector2(panelSize.x - pad * 1.2f, colorTop - colorBottom + 0.010f),
+                0.018f
+            );
 
             // separator
             layout.Gap(0.008f);
@@ -658,10 +680,20 @@ namespace MixedRealityProject.Drawing
 
             // ---------- BRUSH ----------
             var pressureRow = layout.Row(0.034f);
-            MakeToggleButton("pressure", pressureRow.Fill(),
+            var pressureCell = pressureRow.Fill();
+
+            MakeToggleButton("pressure", pressureCell,
                 () => StrokeSettings.SizeMode == SizeMode.PressureBrush,
                 () => StrokeSettings.SizeMode = StrokeSettings.SizeMode == SizeMode.PressureBrush
                     ? SizeMode.FixedPen : SizeMode.PressureBrush);
+
+            pressureDim = MakeDisabledOverlay(
+                panel.transform,
+                "PressureDisabled",
+                new Vector3(pressureCell.Center.x, pressureCell.Center.y, -0.020f),
+                new Vector2(panelSize.x - pad * 1.2f, pressureCell.Size.y + 0.006f),
+                0.014f
+            );
 
             var sizeRow = layout.Row(0.024f);
             var sizeLabel = sizeRow.Left(0.055f);
@@ -677,7 +709,15 @@ namespace MixedRealityProject.Drawing
             size.transform.localPosition = sizeSliderPos;
 
             size.AddComponent<SizeSlider>().Build(new Vector2(sizeCell.Size.x, 0.018f));
-            RegisterDrawOnly(size);
+            RegisterSizeControl(size);
+
+            sizeDim = MakeDisabledOverlay(
+                panel.transform,
+                "SizeDisabled",
+                new Vector3(0f, sizeCell.Center.y, -0.020f),
+                new Vector2(panelSize.x - pad * 1.2f, sizeCell.Size.y + 0.006f),
+                0.014f
+            );
 
             // separator
             layout.Gap(0.008f);
@@ -703,6 +743,14 @@ namespace MixedRealityProject.Drawing
             MakeIconToggleButton("line", "line-mode", toggleCells[2],
                 () => StrokeSettings.SnapAxis,
                 () => StrokeSettings.SnapAxis = !StrokeSettings.SnapAxis);
+
+            guidesDim = MakeDisabledOverlay(
+                panel.transform,
+                "GuidesDisabled",
+                new Vector3(0f, toggleCells[1].Center.y, -0.020f),
+                new Vector2(panelSize.x - pad * 1.2f, toggleCells[1].Size.y + 0.008f),
+                0.014f
+            );
 
             // ---------- SEPARATOR ----------
             layout.Gap(0.006f);
@@ -742,13 +790,7 @@ namespace MixedRealityProject.Drawing
 
             BuildEraseDeleteButtons(eraseDeleteCell);
             
-            drawOnlyMainDim = MakeDisabledOverlay(
-                panel.transform,
-                "DrawOnlyMainDisabled",
-                new Vector3(0f, 0.047f, -0.020f),
-                new Vector2(panelSize.x - pad * 1.2f, 0.365f),
-                0.018f
-            );
+            
 
         }
 
@@ -760,10 +802,21 @@ namespace MixedRealityProject.Drawing
             if (panel != null)
                 Destroy(panel);
             toggleSync.Clear();
-            drawOnlyControls.Clear();
-            drawOnlyMainDim = null;
-            drawOnlyBrushDim = null;
-            lastDrawOnlyEnabled = true;
+            colorControls.Clear();
+            sizeControls.Clear();
+            penOnlyControls.Clear();
+            brushOnlyControls.Clear();
+
+            colorDim = null;
+            pressureDim = null;
+            sizeDim = null;
+            guidesDim = null;
+            brushDim = null;
+
+            lastColorEnabled = true;
+            lastSizeEnabled = true;
+            lastPenOnlyEnabled = true;
+            lastBrushEnabled = true;
             lastTool = (ToolMode)(-1);
             lastType = -1;
             BuildPanel();
@@ -783,10 +836,21 @@ namespace MixedRealityProject.Drawing
             if (shortcutsPanel != null) Destroy(shortcutsPanel);
             toggleSync.Clear();
             optionsSync.Clear(); // i sync di Options puntano a renderer ora distrutti
-            drawOnlyControls.Clear();
-            drawOnlyMainDim = null;
-            drawOnlyBrushDim = null;
-            lastDrawOnlyEnabled = true;
+            colorControls.Clear();
+            sizeControls.Clear();
+            penOnlyControls.Clear();
+            brushOnlyControls.Clear();
+
+            colorDim = null;
+            pressureDim = null;
+            sizeDim = null;
+            guidesDim = null;
+            brushDim = null;
+
+            lastColorEnabled = true;
+            lastSizeEnabled = true;
+            lastPenOnlyEnabled = true;
+            lastBrushEnabled = true;
             lastTool = (ToolMode)(-1);
             lastType = -1;
             BuildPanel();
@@ -1252,22 +1316,33 @@ namespace MixedRealityProject.Drawing
             bar.transform.localRotation = Quaternion.Euler(0f, 0f, ang);
         }
 
-        void RegisterDrawOnly(GameObject go)
+        void RegisterColorControl(GameObject go)
         {
-            if (go != null && !drawOnlyControls.Contains(go))
-                drawOnlyControls.Add(go);
+            if (go != null && !colorControls.Contains(go))
+                colorControls.Add(go);
         }
 
-        void SyncDrawOnlyAvailability()
+        void RegisterSizeControl(GameObject go)
         {
-            bool enabled = StrokeSettings.Tool == ToolMode.Pen;
+            if (go != null && !sizeControls.Contains(go))
+                sizeControls.Add(go);
+        }
 
-            if (enabled == lastDrawOnlyEnabled)
-                return;
+        void RegisterPenOnlyControl(GameObject go)
+        {
+            if (go != null && !penOnlyControls.Contains(go))
+                penOnlyControls.Add(go);
+        }
 
-            lastDrawOnlyEnabled = enabled;
+        void RegisterBrushOnlyControl(GameObject go)
+        {
+            if (go != null && !brushOnlyControls.Contains(go))
+                brushOnlyControls.Add(go);
+        }
 
-            foreach (var root in drawOnlyControls)
+        void SetControlGroupEnabled(List<GameObject> roots, bool enabled)
+        {
+            foreach (var root in roots)
             {
                 if (root == null)
                     continue;
@@ -1275,12 +1350,55 @@ namespace MixedRealityProject.Drawing
                 foreach (var col in root.GetComponentsInChildren<Collider>(true))
                     col.enabled = enabled;
             }
+        }
 
-            if (drawOnlyMainDim != null)
-                drawOnlyMainDim.SetActive(!enabled);
+        void SyncToolControlAvailability()
+        {
+            bool colorEnabled = StrokeSettings.Tool == ToolMode.Pen
+                            || StrokeSettings.Tool == ToolMode.Fill;
 
-            if (drawOnlyBrushDim != null)
-                drawOnlyBrushDim.SetActive(!enabled);
+            bool sizeEnabled = StrokeSettings.Tool == ToolMode.Pen
+                            || StrokeSettings.Tool == ToolMode.Eraser;
+
+            bool penOnlyEnabled = StrokeSettings.Tool == ToolMode.Pen;
+            bool brushEnabled = StrokeSettings.Tool == ToolMode.Pen;
+
+            if (colorEnabled != lastColorEnabled)
+            {
+                lastColorEnabled = colorEnabled;
+                SetControlGroupEnabled(colorControls, colorEnabled);
+                if (colorDim != null)
+                    colorDim.SetActive(!colorEnabled);
+            }
+
+            if (sizeEnabled != lastSizeEnabled)
+            {
+                lastSizeEnabled = sizeEnabled;
+                SetControlGroupEnabled(sizeControls, sizeEnabled);
+                if (sizeDim != null)
+                    sizeDim.SetActive(!sizeEnabled);
+            }
+
+            if (penOnlyEnabled != lastPenOnlyEnabled)
+            {
+                lastPenOnlyEnabled = penOnlyEnabled;
+                SetControlGroupEnabled(penOnlyControls, penOnlyEnabled);
+
+                if (pressureDim != null)
+                    pressureDim.SetActive(!penOnlyEnabled);
+
+                if (guidesDim != null)
+                    guidesDim.SetActive(!penOnlyEnabled);
+            }
+
+            if (brushEnabled != lastBrushEnabled)
+            {
+                lastBrushEnabled = brushEnabled;
+                SetControlGroupEnabled(brushOnlyControls, brushEnabled);
+
+                if (brushDim != null)
+                    brushDim.SetActive(!brushEnabled);
+            }
         }
 
         GameObject MakeDisabledOverlay(Transform parent, string name, Vector3 localPos, Vector2 size, float corner)
@@ -1341,7 +1459,7 @@ namespace MixedRealityProject.Drawing
             var strip = MakeRounded(panel.transform, "BrushStrip", new Vector3(stripX, 0f, 0f),
                 stripSize, 0.016f, PanelColor, QueuePanel);
 
-            drawOnlyBrushDim = MakeDisabledOverlay(
+            brushDim = MakeDisabledOverlay(
                 strip.transform,
                 "BrushStripDisabled",
                 new Vector3(0f, 0f, -0.020f),
@@ -1368,7 +1486,7 @@ namespace MixedRealityProject.Drawing
                 brushPreviewMats[i] = MakeTexQuad(b.transform, BrushPreview.Get(type),
                     new Vector3(0f, -bSize * 0.13f, -0.004f), new Vector2(bSize * 0.78f, bSize * 0.40f));
                 brushButtons[i] = b.GetComponent<Renderer>();
-                RegisterDrawOnly(b);
+                RegisterBrushOnlyControl(b);
                 if (off)
                     b.SetActive(false); // nascosto e non consuma uno slot visibile
                 else
@@ -1587,7 +1705,7 @@ namespace MixedRealityProject.Drawing
 
             // Mirror/Grid/Line sono controlli Draw-only:
             // quando non sei su Draw, SyncDrawOnlyAvailability disabilita i collider.
-            RegisterDrawOnly(b);
+            RegisterPenOnlyControl(b);
 
             b.GetComponent<PaletteButton>().ToggleState = isOn;
 
@@ -1642,10 +1760,9 @@ namespace MixedRealityProject.Drawing
             var b = MakeRoundedButton(parent, labelKey + "Toggle", cell.Center, cell.Size,
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
 
-            if (parent == panel.transform &&
-                (labelKey == "pressure" || labelKey == "mirror" || labelKey == "grid" || labelKey == "line"))
+            if (parent == panel.transform && labelKey == "pressure")
             {
-                RegisterDrawOnly(b);
+                RegisterPenOnlyControl(b);
             }
             // È un toggle: il feedback userà il suono on/off in base al nuovo stato.
             b.GetComponent<PaletteButton>().ToggleState = isOn;

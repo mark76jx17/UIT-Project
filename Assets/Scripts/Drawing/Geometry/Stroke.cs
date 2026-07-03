@@ -322,17 +322,84 @@ namespace MixedRealityProject.Drawing
         /// </summary>
         public static GameObject FillGroup(Transform root, Color color, float closeThreshold)
         {
-            var contour = AssembleGroupContour(root, closeThreshold);
-            if (contour == null)
+            var strokes = root.GetComponentsInChildren<Stroke>();
+            if (strokes.Length < 2)
                 return null;
-            var s = root.GetComponentInChildren<Stroke>();
-            var brushType = s != null ? s.brushType : BrushType.Round;
-            var fill = BuildFillObject(contour, null, color, brushType, selectable: false);
-            if (fill.GetComponent<MeshFilter>() == null) // contorno degenere
+
+            // Converti ogni stroke figlio in punti nello spazio locale della root.
+            var segments = new List<List<Vector3>>();
+
+            foreach (var s in strokes)
             {
-                Destroy(fill);
-                return null;
+                if (s.rawPoints.Count < 2)
+                    continue;
+
+                var seg = new List<Vector3>(s.rawPoints.Count);
+                foreach (var p in s.rawPoints)
+                    seg.Add(root.InverseTransformPoint(s.transform.TransformPoint(p)));
+
+                segments.Add(seg);
             }
+
+            if (segments.Count < 2)
+                return null;
+
+            // Costruisci il contorno scegliendo ogni volta il segmento più vicino
+            // all'estremo corrente. Se conviene, lo aggiunge al contrario.
+            var pts = new List<Vector3>(segments[0]);
+            segments.RemoveAt(0);
+
+            while (segments.Count > 0)
+            {
+                Vector3 tail = pts[^1];
+
+                int bestIndex = -1;
+                bool reverse = false;
+                float bestDist = float.MaxValue;
+
+                for (int i = 0; i < segments.Count; i++)
+                {
+                    var seg = segments[i];
+
+                    float dStart = Vector3.Distance(tail, seg[0]);
+                    if (dStart < bestDist)
+                    {
+                        bestDist = dStart;
+                        bestIndex = i;
+                        reverse = false;
+                    }
+
+                    float dEnd = Vector3.Distance(tail, seg[^1]);
+                    if (dEnd < bestDist)
+                    {
+                        bestDist = dEnd;
+                        bestIndex = i;
+                        reverse = true;
+                    }
+                }
+
+                if (bestIndex < 0 || bestDist > closeThreshold)
+                    return null;
+
+                var chosen = segments[bestIndex];
+                segments.RemoveAt(bestIndex);
+
+                if (reverse)
+                    chosen.Reverse();
+
+                // Evita di duplicare il punto di giunzione.
+                int start = Vector3.Distance(pts[^1], chosen[0]) < 0.005f ? 1 : 0;
+                for (int i = start; i < chosen.Count; i++)
+                    pts.Add(chosen[i]);
+            }
+
+            if (pts.Count < 3 || Vector3.Distance(pts[0], pts[^1]) > closeThreshold)
+                return null;
+
+            var fill = FillSurface.Build(pts, BrushMaterials.Get(color, BrushType.Round));
+            if (fill == null)
+                return null;
+
             fill.transform.SetParent(root, false);
             return fill;
         }
