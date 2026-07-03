@@ -96,6 +96,67 @@ namespace MixedRealityProject.Drawing
             }
         }
 
+        // Linea elastica: passo del ricampionamento del segmento durante il trascinamento.
+        // Punti REALI (non solo 2 estremi) così gomma parziale, magnete e fill vedono una
+        // polilinea normale; il tetto ai segmenti tiene basso il costo del rebuild per frame.
+        const float LineSpacing = 0.01f;
+        const int LineMaxSegs = 100;
+        Transform lineEndCap;
+
+        /// <summary>
+        /// Linea elastica (modalità Line): sostituisce il contenuto del tratto col segmento
+        /// start→end ricampionato. Chiamata ogni frame finché si tiene il trigger: la mesh
+        /// viene rigenerata da capo (poche decine di anelli, costo trascurabile). Il cap di
+        /// coda segue l'estremo; si chiama "Cap" così Finish lo ricrea con la rastrematura.
+        /// </summary>
+        public void SetLineEnd(Vector3 end, float radius)
+        {
+            Vector3 start = rawPoints[0];
+            float startR = rawRadii[0];
+            rawPoints.Clear();
+            rawRadii.Clear();
+            float len = Vector3.Distance(start, end);
+            int segs = Mathf.Clamp(Mathf.CeilToInt(len / LineSpacing), 1, LineMaxSegs);
+            for (int i = 0; i <= segs; i++)
+            {
+                float k = i / (float)segs;
+                rawPoints.Add(Vector3.Lerp(start, end, k));
+                rawRadii.Add(Mathf.Lerp(startR, radius, k));
+            }
+            currentRadius = radius;
+            LastPoint = end;
+            lodRadius = Mathf.Max(lodRadius, radius);
+
+            filter.mesh.Clear();
+            mesher = new TubeMesher(filter.mesh, MeshSides);
+            mesher.UpHint = frameUp.sqrMagnitude > 1e-6f ? frameUp : (Vector3?)null;
+            mesher.UvScale = brushType == BrushType.Dashed ? DashUvScale(lodRadius) : 1f;
+            mesher.AddRange(rawPoints, rawRadii);
+
+            if (lineEndCap == null)
+            {
+                var cap = new GameObject("Cap");
+                cap.transform.SetParent(transform, false);
+                cap.AddComponent<MeshFilter>().sharedMesh = BrushMeshes.Sphere();
+                cap.AddComponent<MeshRenderer>().sharedMaterial = material;
+                lineEndCap = cap.transform;
+            }
+            lineEndCap.position = end;
+            lineEndCap.localScale = Vector3.one * radius * 2f;
+        }
+
+        /// <summary>
+        /// Chiusura di un tratto in modalità Line: come Finish, più i collider di presa
+        /// lungo il segmento (per i tratti normali li semina AddPoint man mano; qui i punti
+        /// arrivano tutti insieme da SetLineEnd, quindi vanno aggiunti a posteriori).
+        /// </summary>
+        public void FinishLine()
+        {
+            Finish();
+            for (int i = SamplesPerGrabCollider; i < rawPoints.Count - 1; i += SamplesPerGrabCollider)
+                AddGrabCollider(rawPoints[i], rawRadii[i]);
+        }
+
         public void Finish()
         {
             mesher.Flush(); // carica gli ultimi anelli rimasti per il throttling dell'upload

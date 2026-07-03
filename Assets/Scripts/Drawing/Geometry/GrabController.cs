@@ -62,11 +62,12 @@ namespace MixedRealityProject.Drawing
                     OVRInput.SetControllerVibration(0f, 0f, controller);
             }
 
-            // Vicino alla palette (o mentre la si trascina) la mano-pennello NON afferra i tratti:
-            // il grip è riservato allo spostamento della palette. Non interrompe una presa già
-            // in corso (holding != null), così se stavi già spostando un tratto lo concludi.
+            // Vicino alla palette o al foglio a quadretti (o mentre li si trascina) la
+            // mano-pennello NON afferra i tratti: il grip è riservato allo spostamento del
+            // pannello. Non interrompe una presa già in corso (holding != null), così se
+            // stavi già spostando un tratto lo concludi.
             if (controller == StrokeSettings.BrushHand
-                && PaletteController.SuppressBrushGrab
+                && (PaletteController.SuppressBrushGrab || ReferenceGrid.SuppressBrushGrab)
                 && holding == null)
             {
                 SetHover(null);

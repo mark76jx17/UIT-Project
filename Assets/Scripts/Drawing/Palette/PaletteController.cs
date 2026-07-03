@@ -156,10 +156,7 @@ namespace MixedRealityProject.Drawing
         Renderer hlRibbon;
         Material hlMat;
         Mesh hlMesh;
-        Vector2[] periPos;          // contorno arrotondato campionato (loop): posizioni locali
-        Vector2[] periNrm;          // normali uscenti per ogni campione
-        float[] periArc;            // arc-length cumulativo per ogni campione
-        float periLen;              // lunghezza totale del contorno
+        GrabRibbon hlGeom;          // matematica contorno+striscia (condivisa con GridSheet)
         Vector2 panelRectSize;      // dimensioni del pannello, per la matematica del perimetro
         bool brushNearPalette;      // controller-pennello entro il raggio di presa
         Vector3 grabLocalPos;       // posa della palette nello spazio del controller all'aggancio
@@ -175,6 +172,12 @@ namespace MixedRealityProject.Drawing
 
         // True quando la palette è fissata nella stanza (Placed): abilita il ray della mano-palette.
         public static bool Placed;
+
+        // True mentre la palette è trascinata col grip (Grabbing). PaletteButton (poke) e
+        // PaletteRay (press) lo leggono per SOSPENDERE le pressioni: spostando la palette i
+        // bottoni "passano" sopra la punta o sotto il ray e scatterebbero da soli. Sospese solo
+        // le pressioni, non gli altri processi → poke/ray/grab convivono senza scatti.
+        public static bool IsGrabbing;
 
         // Letta dal GrabController della mano-pennello: mentre la palette è vicina/afferrata, la
         // presa dei tratti viene soppressa, così il grip muove la palette e non i tratti.
@@ -206,6 +209,7 @@ namespace MixedRealityProject.Drawing
             Localization.LanguageChanged -= OnLanguageChanged;
             SuppressBrushGrab = false; // non lasciare il grip tratti soppresso se la palette sparisce
             Placed = false;
+            IsGrabbing = false;
         }
 
         // Differisce la ricostruzione: vedi `languageDirty`.
@@ -384,10 +388,14 @@ namespace MixedRealityProject.Drawing
                 if (grip <= GripRelease)
                 {
                     placeMode = PlaceMode.Placed; // lascia la palette dov'è, fissa nello spazio
+                    IsGrabbing = false;
                     PulseBrush(0.03f);
                 }
             }
-            else if (inGrabRange && grip >= GripPress)
+            // Non agganciare se il grip sta già trascinando il foglio a quadretti:
+            // un solo pannello per mano (il foglio, simmetricamente, dà precedenza
+            // alla palette quando è lei a portata).
+            else if (inGrabRange && grip >= GripPress && !ReferenceGrid.IsGrabbing)
             {
                 BeginGrab();
             }
@@ -396,6 +404,7 @@ namespace MixedRealityProject.Drawing
         void BeginGrab()
         {
             placeMode = PlaceMode.Grabbing;
+            IsGrabbing = true;
             // Spazio mondo: così da Placed non seguirà più la mano.
             transform.SetParent(null, true);
             var bt = Brush.transform;
@@ -408,6 +417,7 @@ namespace MixedRealityProject.Drawing
         void Redock()
         {
             placeMode = PlaceMode.Docked;
+            IsGrabbing = false;
             if (HandAnchor != null)
                 transform.SetParent(HandAnchor, false); // LateUpdate la riposiziona sopra la mano
             SuppressBrushGrab = false;
@@ -426,13 +436,11 @@ namespace MixedRealityProject.Drawing
         }
 
         // Striscia glow che scorre lungo il CONTORNO arrotondato del pannello, centrata su una
-        // finestra (HlWindow) attorno al punto più vicino al controller. Passando da lato ad angolo
-        // segue la curva → transizione SMOOTH (niente salto tra forme diverse). Bianco, ben visibile.
-        Vector3[] hlVerts;
-        Vector2[] hlUv;
+        // finestra (HlWindow) attorno al punto più vicino al controller. La matematica
+        // (perimetro + finestra) vive in GrabRibbon, condivisa col foglio a quadretti.
         void UpdateHighlight(Vector3 brushPos, float t, bool grabbable)
         {
-            if (hlRibbon == null || periPos == null)
+            if (hlRibbon == null || hlGeom == null)
                 return;
 
             float a = Mathf.Clamp01(t) * (grabbable ? 1f : 0.65f);
@@ -448,153 +456,16 @@ namespace MixedRealityProject.Drawing
             col.a = a;
             hlMat.SetColor(BaseColorId, col);
 
-            // Punto più vicino sul contorno (campione con distanza minima), in spazio locale del
-            // pannello (pre-scala: InverseTransformPoint annulla la scala d'animazione).
+            // Punto più vicino in spazio locale del pannello (pre-scala: InverseTransformPoint
+            // annulla la scala d'animazione).
             Vector3 lp = panel.transform.InverseTransformPoint(brushPos);
-            var lp2 = new Vector2(lp.x, lp.y);
-            int nearest = 0;
-            float best = float.MaxValue;
-            for (int i = 0; i < periPos.Length; i++)
-            {
-                float d = (periPos[i] - lp2).sqrMagnitude;
-                if (d < best) { best = d; nearest = i; }
-            }
-            RebuildRibbon(periArc[nearest]);
-        }
-
-        // Ricostruisce la striscia per la finestra [s0-HlWindow/2, s0+HlWindow/2] lungo il contorno.
-        void RebuildRibbon(float s0)
-        {
-            int pts = HlWindowSegs + 1;
-            if (hlVerts == null || hlVerts.Length != pts * 2)
-            {
-                hlVerts = new Vector3[pts * 2];
-                hlUv = new Vector2[pts * 2];
-                var tris = new int[HlWindowSegs * 6];
-                for (int i = 0; i < HlWindowSegs; i++)
-                {
-                    int b = i * 2;
-                    tris[i * 6 + 0] = b; tris[i * 6 + 1] = b + 2; tris[i * 6 + 2] = b + 1;
-                    tris[i * 6 + 3] = b + 1; tris[i * 6 + 4] = b + 2; tris[i * 6 + 5] = b + 3;
-                }
-                hlMesh.Clear();
-                // imposto prima i vertici (riempiti sotto), poi i triangoli una volta
-                hlMesh.vertices = hlVerts;
-                hlMesh.triangles = tris;
-            }
-
-            float half = HlThick * 0.5f;
-            for (int i = 0; i < pts; i++)
-            {
-                float frac = i / (float)HlWindowSegs;       // 0..1 lungo la finestra
-                float s = s0 + (frac - 0.5f) * HlWindow;
-                SampleContour(s, out var p, out var n);
-                hlVerts[i * 2] = new Vector3(p.x - n.x * half, p.y - n.y * half, 0f); // interno
-                hlVerts[i * 2 + 1] = new Vector3(p.x + n.x * half, p.y + n.y * half, 0f); // esterno
-                hlUv[i * 2] = new Vector2(frac, 0f);
-                hlUv[i * 2 + 1] = new Vector2(frac, 1f);
-            }
-            hlMesh.vertices = hlVerts;
-            hlMesh.uv = hlUv;
-            hlMesh.RecalculateBounds();
-        }
-
-        // Campiona il contorno a una data arc-length (wrap sul loop): posizione + normale uscente.
-        void SampleContour(float s, out Vector2 pos, out Vector2 nrm)
-        {
-            s = Mathf.Repeat(s, periLen);
-            int n = periPos.Length;
-            for (int i = 0; i < n; i++)
-            {
-                float a0 = periArc[i];
-                float a1 = (i + 1 < n) ? periArc[i + 1] : periLen;
-                if (s >= a0 && s <= a1)
-                {
-                    float k = a1 > a0 ? (s - a0) / (a1 - a0) : 0f;
-                    int j = (i + 1) % n;
-                    pos = Vector2.Lerp(periPos[i], periPos[j], k);
-                    nrm = Vector2.Lerp(periNrm[i], periNrm[j], k).normalized;
-                    return;
-                }
-            }
-            pos = periPos[0];
-            nrm = periNrm[0];
+            hlGeom.RebuildAt(new Vector2(lp.x, lp.y), hlMesh);
         }
 
         void HideHighlight()
         {
             if (hlRibbon != null && hlRibbon.enabled)
                 hlRibbon.enabled = false;
-        }
-
-        // Campiona il contorno arrotondato (rettangolo con angoli di raggio r) in un loop ordinato
-        // di (posizione, normale uscente, arc-length). Lati + 4 archi → transizione continua.
-        void BuildPerimeter(Vector2 size, float r)
-        {
-            float hx = size.x * 0.5f, hy = size.y * 0.5f;
-            var list = new System.Collections.Generic.List<(Vector2 p, Vector2 n)>();
-            void Line(Vector2 from, Vector2 to, Vector2 nrm, int segs)
-            {
-                for (int i = 0; i < segs; i++)
-                    list.Add((Vector2.Lerp(from, to, i / (float)segs), nrm)); // estremo escluso
-            }
-            void Arc(Vector2 c, float a0, float a1, int segs)
-            {
-                for (int i = 0; i < segs; i++)
-                {
-                    float ang = Mathf.Lerp(a0, a1, i / (float)segs);
-                    var dir = new Vector2(Mathf.Cos(ang), Mathf.Sin(ang));
-                    list.Add((c + dir * r, dir));
-                }
-            }
-            const float HALF_PI = Mathf.PI * 0.5f;
-            Line(new Vector2(hx, -(hy - r)), new Vector2(hx, hy - r), new Vector2(1, 0), 6);
-            Arc(new Vector2(hx - r, hy - r), 0f, HALF_PI, 5);
-            Line(new Vector2(hx - r, hy), new Vector2(-(hx - r), hy), new Vector2(0, 1), 8);
-            Arc(new Vector2(-(hx - r), hy - r), HALF_PI, Mathf.PI, 5);
-            Line(new Vector2(-hx, hy - r), new Vector2(-hx, -(hy - r)), new Vector2(-1, 0), 6);
-            Arc(new Vector2(-(hx - r), -(hy - r)), Mathf.PI, Mathf.PI * 1.5f, 5);
-            Line(new Vector2(-(hx - r), -hy), new Vector2(hx - r, -hy), new Vector2(0, -1), 8);
-            Arc(new Vector2(hx - r, -(hy - r)), Mathf.PI * 1.5f, Mathf.PI * 2f, 5);
-
-            int count = list.Count;
-            periPos = new Vector2[count];
-            periNrm = new Vector2[count];
-            periArc = new float[count];
-            float acc = 0f;
-            for (int i = 0; i < count; i++)
-            {
-                periPos[i] = list[i].p;
-                periNrm[i] = list[i].n.normalized;
-                periArc[i] = acc;
-                int j = (i + 1) % count;
-                acc += Vector2.Distance(list[i].p, list[j].p);
-            }
-            periLen = acc;
-        }
-
-        // Texture per la striscia: piena (alpha 1) nella maggior parte della sezione, sfuma solo ai
-        // bordi e alle estremità → SOLIDA e ben visibile, non "solo trasparente".
-        static Texture2D glowTex;
-        static Texture2D GlowTexture()
-        {
-            if (glowTex != null)
-                return glowTex;
-            const int W = 64, H = 24;
-            glowTex = new Texture2D(W, H, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
-            var px = new Color[W * H];
-            for (int y = 0; y < H; y++)
-                for (int x = 0; x < W; x++)
-                {
-                    float u = x / (W - 1f), v = y / (H - 1f);
-                    float fx = Mathf.SmoothStep(0f, 0.12f, u) * Mathf.SmoothStep(0f, 0.12f, 1f - u);
-                    float dv = Mathf.Abs(v - 0.5f) * 2f;
-                    float fy = 1f - Mathf.SmoothStep(0.7f, 1f, dv); // pieno fino al 70% dello spessore
-                    px[y * W + x] = new Color(1f, 1f, 1f, fx * fy);
-                }
-            glowTex.SetPixels(px);
-            glowTex.Apply();
-            return glowTex;
         }
 
         void PulseBrush(float duration) => brushHapticTimer = Mathf.Max(brushHapticTimer, duration);
@@ -658,7 +529,7 @@ namespace MixedRealityProject.Drawing
             // Indicatore di "grab": striscia glow che scorre lungo il contorno arrotondato (vedi
             // UpdateHighlight). Costruisco il contorno campionato e l'oggetto con mesh dinamica.
             panelRectSize = panelSize;
-            BuildPerimeter(panelSize, 0.030f);
+            hlGeom = new GrabRibbon(panelSize, PanelCorner, HlThick, HlWindow, HlWindowSegs);
             var hlGO = new GameObject("GrabHighlight");
             hlGO.transform.SetParent(panel.transform, false);
             hlGO.transform.localPosition = new Vector3(0f, 0f, -0.003f); // davanti al pannello

@@ -79,6 +79,22 @@ namespace MixedRealityProject.Drawing
                 return;
             }
 
+            // Palette o foglio a quadretti trascinati col grip: i controlli della palette
+            // passano davanti al ray, che cliccherebbe da solo. Ray spento e niente press
+            // finché non si rilascia; il trigger della mano-pennello non disegna (il grip
+            // sta spostando il pannello).
+            if (PaletteController.IsGrabbing || ReferenceGrid.IsGrabbing)
+            {
+                line.enabled = false;
+                SetHoveredButton(null);
+                if (Role == HandRole.Palette)
+                    PaletteHandOnPalette = false;
+                else if (Brush != null)
+                    Brush.SuppressDrawing = true;
+                wasPressed = OVRInput.Get(OVRInput.Axis1D.PrimaryIndexTrigger, Controller) >= pressThreshold;
+                return;
+            }
+
             // Origine/direzione del ray: dalla punta del pennello se presente (collineare con
             // tip+controller, così "esce" da dove si punta); altrimenti dal controller in avanti
             // (mano-palette, che non ha punta del pennello).

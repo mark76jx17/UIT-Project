@@ -1,24 +1,26 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace MixedRealityProject.Drawing
 {
     /// <summary>
-    /// Griglia di riferimento a pavimento (stile Gravity Sketch): dà profondità e senso
-    /// della scala quando si disegna in aria. Mesh a linee sul piano XZ, centrata sotto
-    /// l'utente all'attivazione, semitrasparente. Si accende/spegne dal toggle "Grid".
-    /// Posta sull'origine di tracking (y≈0); se il tracking non è a livello pavimento
-    /// può comparire più in alto — regolabile da GridHeight.
+    /// Toggle "Grid" della palette: crea/distrugge il foglio a quadretti 3D (GridSheet),
+    /// il riferimento visivo da disegno posizionabile nella stanza — ha sostituito la
+    /// vecchia griglia a pavimento, inutile in passthrough (il pavimento reale c'è già).
+    /// Facciata statica con la stessa API di sempre (Toggle/Enable/Disable/Enabled), così
+    /// palette, flick dello stick e simulatore desktop non cambiano. Con Line attiva il
+    /// foglio fa da piano di disegno: BrushController proietta via TryProject.
     /// </summary>
     public static class ReferenceGrid
     {
-        public static bool Enabled { get; private set; }
+        public static bool Enabled => sheet != null;
 
-        const float HalfSize = 2.0f;   // griglia 4×4 m
-        const float Spacing = 0.25f;   // celle da 25 cm
-        const float GridHeight = 0.001f;
+        // Scritti da GridSheet, letti da GrabController/PaletteRay: come i gemelli di
+        // PaletteController, sospendono presa tratti e disegno mentre il foglio è
+        // vicino al grip / trascinato.
+        public static bool SuppressBrushGrab;
+        public static bool IsGrabbing;
 
-        static GameObject visual;
+        static GridSheet sheet;
 
         public static void Toggle(Transform reference)
         {
@@ -28,53 +30,29 @@ namespace MixedRealityProject.Drawing
                 Enable(reference);
         }
 
-        public static void Enable(Transform reference)
-        {
-            visual = Build(reference);
-            Enabled = true;
-        }
+        public static void Enable(Transform reference) => sheet = GridSheet.Create(reference);
 
         public static void Disable()
         {
-            if (visual != null)
-                Object.Destroy(visual);
-            Enabled = false;
+            if (sheet != null)
+                Object.Destroy(sheet.gameObject); // OnDestroy del foglio resetta i flag
+            sheet = null;
         }
 
-        static GameObject Build(Transform reference)
+        /// <summary>Proiezione sul foglio (vedi GridSheet.TryProject); false se la grid è spenta.</summary>
+        public static bool TryProject(Vector3 worldPos, out Vector3 projected)
         {
-            var go = new GameObject("ReferenceGrid");
-            float cx = reference != null ? reference.position.x : 0f;
-            float cz = reference != null ? reference.position.z : 0f;
-            // Aggancia il centro alla cella più vicina sotto l'utente.
-            go.transform.position = new Vector3(
-                Mathf.Round(cx / Spacing) * Spacing, GridHeight, Mathf.Round(cz / Spacing) * Spacing);
-
-            var verts = new List<Vector3>();
-            var indices = new List<int>();
-            int lines = Mathf.RoundToInt(HalfSize / Spacing);
-            for (int i = -lines; i <= lines; i++)
+            if (sheet == null)
             {
-                float p = i * Spacing;
-                AddLine(verts, indices, new Vector3(p, 0f, -HalfSize), new Vector3(p, 0f, HalfSize));
-                AddLine(verts, indices, new Vector3(-HalfSize, 0f, p), new Vector3(HalfSize, 0f, p));
+                projected = worldPos;
+                return false;
             }
-
-            var mesh = new Mesh { name = "ReferenceGrid" };
-            mesh.SetVertices(verts);
-            mesh.SetIndices(indices, MeshTopology.Lines, 0);
-            mesh.RecalculateBounds();
-
-            go.AddComponent<MeshFilter>().mesh = mesh;
-            go.AddComponent<MeshRenderer>().material =
-                BrushMaterials.CreateUnlit(new Color(0.55f, 0.45f, 0.95f, 0.30f));
-            return go;
+            return sheet.TryProject(worldPos, out projected);
         }
 
-        static void AddLine(List<Vector3> verts, List<int> indices, Vector3 a, Vector3 b)
-        {
-            indices.Add(verts.Count); verts.Add(a);
-            indices.Add(verts.Count); verts.Add(b);
-        }
+        /// <summary>Proiezione senza vincolo di distanza (latch del tratto sulla carta);
+        /// identità se la grid è spenta (es. spenta a metà tratto).</summary>
+        public static Vector3 ProjectClamped(Vector3 worldPos)
+            => sheet != null ? sheet.ProjectClamped(worldPos) : worldPos;
     }
 }

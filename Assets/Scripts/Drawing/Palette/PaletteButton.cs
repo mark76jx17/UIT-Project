@@ -80,6 +80,9 @@ namespace MixedRealityProject.Drawing
             // Se un menu modale (Options) è aperto, i controlli "sotto" non rispondono.
             if (!PaletteController.IsInteractable(gameObject))
                 return;
+            // Mentre la palette viene trascinata i bottoni "passano" sopra la punta: niente press.
+            if (PaletteController.IsGrabbing)
+                return;
             Press();
         }
 

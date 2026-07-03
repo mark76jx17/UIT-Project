@@ -41,8 +41,10 @@ strisce laterali (sta nel gap) né i bottoni interni.
   `HighlightRange = 0.22`, pieno a `GrabRange = 0.09` e mentre si afferra; **1.0** agganciabile,
   0.65 in avvicinamento.
 
-Materiale unlit trasparente a doppia faccia con `GlowTexture` **piena** (alpha 1 fino al 70% dello
-spessore, sfuma solo a bordi/estremità → **solida e ben visibile**, non "solo trasparente").
+Materiale unlit trasparente a doppia faccia **bianco pieno, senza texture**: una prima versione
+usava una texture generata a runtime (`GlowTexture`) per sfumare i bordi, ma la sua alpha **non
+funzionava sul device** (in editor sì) → striscia invisibile/"solo trasparente". Rimossa: l'alpha
+viene solo da `_BaseColor`, pilotata per frame in `UpdateHighlight` → bianco sempre ben visibile.
 Spessore `HlThick = 0.012`. `DistanceToPanel` usa `panelBgRenderer.bounds.ClosestPoint` (AABB del
 fondo). Impulso aptico leggero entrando nel raggio di presa e su grab/rilascio/re-dock (`PulseBrush`).
 
@@ -65,6 +67,18 @@ teneva), sia in **poke** sia con il **ray**:
   ri-agganciare sia a cliccare un controllo col ray. Il ray-palette pubblica
   `PaletteRay.PaletteHandOnPalette`; `Redock` scatta **solo se il ray non sta puntando la palette**
   (altrimenti il trigger clicca il controllo).
+
+### Niente pressioni accidentali durante il trascinamento (`IsGrabbing`)
+
+Mentre la palette è **trascinata** col grip, i suoi bottoni passano fisicamente sopra la punta del
+pennello / la sonda poke e davanti ai ray → scattavano da soli (interazione "a scatti").
+`PaletteController.IsGrabbing` (statico, true solo nello stato Grabbing, resettato su
+rilascio/re-dock/`OnDestroy`) sospende **solo le pressioni**, non gli altri processi — così poke,
+ray e grab girano in parallelo senza conflitti:
+- `PaletteButton.OnTriggerEnter` ignora il poke finché `IsGrabbing`;
+- `PaletteRay` spegne linea/hover e non preme; il ray-pennello tiene `SuppressDrawing = true`
+  (il trigger non deve tracciare mentre il grip sposta la palette) e tiene aggiornato `wasPressed`
+  per non generare un falso "fronte di salita" al rilascio del grab.
 
 ## Retro solido (no see-through)
 
@@ -90,15 +104,18 @@ agganciata/pinned). In edit mode niente `Update`/grab (nessuno script è `Execut
 
 ## File toccati
 
-- `Palette/PaletteController.cs` — stato `PlaceMode` + `Placed` (statico); `UpdatePlacement`/
-  `BeginGrab`/`Redock`/`DistanceToPanel`/`UpdateHighlight`/`RebuildRibbon`/`SampleContour`/
-  `BuildPerimeter`/`HideHighlight`/`GlowTexture`/`PulseBrush`; `LateUpdate` per i tre stati; trigger
+- `Palette/PaletteController.cs` — stato `PlaceMode` + `Placed`/`IsGrabbing` (statici); `UpdatePlacement`/
+  `BeginGrab`/`Redock`/`DistanceToPanel`/`UpdateHighlight`/`HideHighlight`/`PulseBrush`
+  (la matematica perimetro+striscia è estratta in `Geometry/GrabRibbon.cs`, condivisa col
+  foglio a quadretti — vedi grid-foglio-design.md); `LateUpdate` per i tre stati; trigger
   mano-palette contestuale (re-dock solo se il ray non punta la palette); striscia `GrabHighlight`
   (mesh dinamica sul contorno) + `panelBgRenderer` in `BuildPanel`; `SuppressBrushGrab` (statico) +
   reset in `OnDestroy`.
 - `Palette/PaletteRay.cs` — `Role` Brush/Palette, controller dinamico, `RequiresPlaced`,
-  `PaletteHandOnPalette` (statico); origine/disegno disaccoppiati da `Brush`.
-- `Palette/PaletteButton.cs` — poke accettato da `BrushTip` **o** `PalettePoke`.
+  `PaletteHandOnPalette` (statico); origine/disegno disaccoppiati da `Brush`; sospeso (niente
+  press/hover, disegno soppresso) mentre `IsGrabbing`.
+- `Palette/PaletteButton.cs` — poke accettato da `BrushTip` **o** `PalettePoke`; ignorato mentre
+  `IsGrabbing`.
 - `Geometry/PalettePoke.cs` — **nuovo**: marker della sonda poke della mano-palette.
 - `Geometry/GrabController.cs` — la mano-pennello salta la presa tratti se `SuppressBrushGrab`.
 - `Geometry/BrushMaterials.cs` — `MakeOpaque` a doppia faccia (`_Cull = Off`): retro solido.
@@ -107,8 +124,7 @@ agganciata/pinned). In edit mode niente `Update`/grab (nessuno script è `Execut
 
 ## Parametri tarabili
 `HighlightRange` (0.22), `GrabRange` (0.09), `GripPress`/`GripRelease` (0.55/0.35); striscia:
-`HlThick`/`HlWindow`/`HlWindowSegs`/`PanelCorner` + alpha in `UpdateHighlight` + pienezza in
-`GlowTexture`; durate `PulseBrush`.
+`HlThick`/`HlWindow`/`HlWindowSegs`/`PanelCorner` + alpha in `UpdateHighlight`; durate `PulseBrush`.
 
 ## Verifica
 Compilazione 0 errori; preview statici invariati (highlight inattivo a riposo → nessuna regressione

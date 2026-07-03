@@ -420,6 +420,13 @@ namespace MixedRealityProject.Drawing
             }
         }
 
+        // Modalità Line, latchata per tratto a inizio pressione (un toggle di Line a metà
+        // tratto — es. col ray dell'altra mano — non deve cambiare il tratto in corso).
+        bool lineStroke;
+        // Il tratto è "sulla carta": iniziato col foglio a quadretti in range, resta
+        // proiettato sul foglio fino al rilascio (latch, come il ray della palette).
+        bool lineOnSheet;
+
         void BeginPress(Vector3 position, float trigger)
         {
             pressed = true;
@@ -438,6 +445,16 @@ namespace MixedRealityProject.Drawing
             {
                 // Inizio normale del tratto: impulso breve
                 HapticPulse(hapticStrokeDuration, frequency: 0.4f, amplitude: 0.5f);
+            }
+
+            // Line + Grid: se la punta è in range del foglio, il tratto nasce appoggiato
+            // alla carta (e ci resta: vedi lineOnSheet). La proiezione vince sul magnete.
+            lineStroke = StrokeSettings.SnapAxis;
+            lineOnSheet = false;
+            if (lineStroke && ReferenceGrid.TryProject(position, out var onSheet))
+            {
+                lineOnSheet = true;
+                position = onSheet;
             }
 
             pressPosition = position;
@@ -463,9 +480,20 @@ namespace MixedRealityProject.Drawing
             float smoothAlpha = 1f - Mathf.Pow(1f - smoothing, Time.deltaTime * 72f);
             smoothed = Vector3.Lerp(smoothed, position, smoothAlpha);
 
-            // Snap ad assi: vincola il tratto all'asse del mondo dominante (linee dritte).
-            if (StrokeSettings.SnapAxis)
-                smoothed = ConstrainToAxis(smoothed);
+            // Line: linea ELASTICA — il tratto è il segmento start→punta che segue il
+            // controller in qualsiasi direzione (oblique incluse; il vecchio ConstrainToAxis
+            // vincolava all'asse del mondo dominante, ricalcolato punto per punto → niente
+            // oblique e "salti" di asse a inizio tratto). Con la Grid in range a inizio
+            // tratto, gli estremi restano appoggiati al foglio (lineOnSheet).
+            if (lineStroke)
+            {
+                prevPosition = position;
+                Vector3 end = lineOnSheet ? ReferenceGrid.ProjectClamped(smoothed) : smoothed;
+                current.SetLineEnd(end, currentRadius);
+                if (mirrored != null)
+                    mirrored.SetLineEnd(Mirror.Reflect(end), currentRadius);
+                return; // niente campionamento adattivo: SetLineEnd ricostruisce il segmento
+            }
 
             // Campionamento adattivo alla velocità: movimenti veloci → distanza minima ridotta
             // (più campioni = maggiore fedeltà del tratto); movimenti lenti → distanza maggiore
@@ -490,6 +518,12 @@ namespace MixedRealityProject.Drawing
             // Fine tratto: impulso breve di conferma
             HapticPulse(hapticStrokeDuration, frequency: 0.3f, amplitude: 0.4f);
 
+            // Tratto sulla carta: anche l'ultima posizione va proiettata, o il confronto
+            // del tap (posizione vs pressPosition proiettata) misurerebbe la distanza
+            // punta-foglio invece del movimento reale.
+            if (lineOnSheet)
+                position = ReferenceGrid.ProjectClamped(position);
+
             bool isTap = Time.time - pressTime <= tapMaxDuration
                          && Vector3.Distance(position, pressPosition) <= tapMaxMovement;
 
@@ -507,12 +541,14 @@ namespace MixedRealityProject.Drawing
             }
             else
             {
-                current.Finish();
+                // Le linee elastiche chiudono con FinishLine: aggiunge i collider di presa
+                // lungo il segmento (i punti non passano da AddPoint che li semina).
+                if (lineStroke) current.FinishLine(); else current.Finish();
                 finished = current.gameObject;
 
                 if (mirrored != null)
                 {
-                    mirrored.Finish();
+                    if (lineStroke) mirrored.FinishLine(); else mirrored.Finish();
                     mirroredObj = mirrored.gameObject;
                 }
             }
@@ -577,16 +613,6 @@ namespace MixedRealityProject.Drawing
                 StrokeHistory.PushErase(target.gameObject);
             }
             HapticPulse(hapticStrokeDuration, frequency: 0.5f, amplitude: 0.6f);
-        }
-
-        // Asse del mondo dominante dal punto di partenza: per disegnare linee dritte.
-        Vector3 ConstrainToAxis(Vector3 p)
-        {
-            Vector3 d = p - pressPosition;
-            float ax = Mathf.Abs(d.x), ay = Mathf.Abs(d.y), az = Mathf.Abs(d.z);
-            if (ax >= ay && ax >= az) return pressPosition + new Vector3(d.x, 0f, 0f);
-            if (ay >= az) return pressPosition + new Vector3(0f, d.y, 0f);
-            return pressPosition + new Vector3(0f, 0f, d.z);
         }
 
         // Secchiello: riempie l'area chiusa puntata col colore corrente.
