@@ -1512,8 +1512,8 @@ namespace MixedRealityProject.Drawing
             // name resta l'identificatore stabile dell'icona/GameObject.
             var actions = new (string name, string labelKey, System.Action action)[]
             {
-                ("redo",  "action.undo",     StrokeHistory.Redo),
-                ("undo",  "action.redo",     StrokeHistory.Undo),
+                ("redo",  "action.redo",     StrokeHistory.Redo),
+                ("undo",  "action.undo",     StrokeHistory.Undo),
                 ("save",  "action.save",     DrawingStore.Save),
                 ("load",  "action.load",     DrawingStore.Load),
                 ("clear", "action.clearAll", DrawingStore.NewScene),
