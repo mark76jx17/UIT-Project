@@ -51,6 +51,12 @@ namespace MixedRealityProject.Drawing
         float dragDistance;
         Vector3 dragOffset;
 
+        // Posa dell'oggetto all'inizio del trascinamento, per registrare lo spostamento
+        // nella history al rilascio (annullabile con Z).
+        Vector3 dragStartPos;
+        Quaternion dragStartRot;
+        Vector3 dragStartScale;
+
         // In editor, anche se c'è il simulatore XR, forziamo i controlli desktop per testare senza visore
         [SerializeField] bool forceDesktopControlsInEditor = true;
 
@@ -108,12 +114,18 @@ namespace MixedRealityProject.Drawing
                 dragged = hoveredGrab;
                 dragDistance = hit.distance;
                 dragOffset = dragged.position - hit.point;
+                dragStartPos = dragged.position;   // posa PRE-trascinamento, per l'undo
+                dragStartRot = dragged.rotation;
+                dragStartScale = dragged.localScale;
                 StrokeHighlight.Set(dragged, 1.45f);
             }
             if (dragged != null)
             {
                 if (!mouse.rightButton.isPressed)
                 {
+                    // Rilascio: registra lo spostamento se l'oggetto si è davvero mosso.
+                    if ((dragged.position - dragStartPos).sqrMagnitude > 1e-4f * 1e-4f)
+                        StrokeHistory.PushTransform(dragged, dragStartPos, dragStartRot, dragStartScale);
                     StrokeHighlight.Clear(dragged);
                     dragged = null;
                 }

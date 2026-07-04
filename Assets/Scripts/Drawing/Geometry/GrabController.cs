@@ -279,6 +279,39 @@ namespace MixedRealityProject.Drawing
             Quaternion rot0;
             Quaternion frame0; // orientamento iniziale delle mani (per il roll)
 
+            // Posa (mondo) all'inizio della presa: catturata quando la sessione nasce
+            // (prima mano), per registrare l'intero spostamento nella history al rilascio
+            // finale. Non si aggiorna nei passaggi due→una mano (Recapture), così l'undo
+            // torna alla posa PRE-presa.
+            Vector3 grabStartPos;
+            Quaternion grabStartRot;
+            Vector3 grabStartScale;
+
+            public void CaptureGrabStart()
+            {
+                if (target == null)
+                    return;
+                grabStartPos = target.position;
+                grabStartRot = target.rotation;
+                grabStartScale = target.localScale;
+            }
+
+            // Registra lo spostamento nella history se la posa è cambiata rispetto
+            // all'inizio della presa (oltre una piccola soglia anti-jitter). Un semplice
+            // afferra-e-rilascia senza spostamento non consuma un passo di undo.
+            public void PushTransformIfMoved()
+            {
+                if (target == null)
+                    return;
+                const float posEps = 1e-4f;   // 0.1 mm
+                const float scaleEps = 1e-4f;
+                bool moved = (target.position - grabStartPos).sqrMagnitude > posEps * posEps
+                          || Quaternion.Angle(target.rotation, grabStartRot) > 0.1f
+                          || (target.localScale - grabStartScale).sqrMagnitude > scaleEps * scaleEps;
+                if (moved)
+                    StrokeHistory.PushTransform(target, grabStartPos, grabStartRot, grabStartScale);
+            }
+
             public void Recapture()
             {
                 if (target == null)
@@ -361,6 +394,7 @@ namespace MixedRealityProject.Drawing
             {
                 session = new Session { target = target };
                 sessions.Add(session);
+                session.CaptureGrabStart(); // posa PRE-presa, per l'undo dello spostamento
             }
             if (!session.hands.Contains(hand))
                 session.hands.Add(hand);
@@ -374,7 +408,10 @@ namespace MixedRealityProject.Drawing
                 return;
             session.hands.Remove(hand);
             if (session.hands.Count == 0 || session.target == null)
+            {
                 sessions.Remove(session);
+                session.PushTransformIfMoved(); // rilascio finale: registra lo spostamento
+            }
             else
                 session.Recapture(); // da due mani a una: ri-aggancia
         }

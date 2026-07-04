@@ -28,6 +28,15 @@ namespace MixedRealityProject.Drawing
             public Transform mergeChild;
             public Transform mergeOldParent;
             public Transform mergeNewParent;
+
+            // Spostamento/rotazione/scala di un oggetto afferrato (la posa è già stata
+            // applicata dal chiamante). Posizione e rotazione in spazio MONDO (robuste a
+            // un'eventuale unione magnete successiva, annullata prima di questa), scala
+            // locale. Reverse (undo): posa "prima"; forward (redo): posa "dopo".
+            public Transform poseTarget;
+            public Vector3 posBefore, posAfter;
+            public Quaternion rotBefore, rotAfter;
+            public Vector3 scaleBefore, scaleAfter;
         }
 
         static readonly List<Action> undo = new();
@@ -55,6 +64,20 @@ namespace MixedRealityProject.Drawing
         /// </summary>
         public static void PushMerge(Transform child, Transform oldParent, Transform newParent)
             => Add(new Action { mergeChild = child, mergeOldParent = oldParent, mergeNewParent = newParent });
+
+        /// <summary>
+        /// Spostamento/rotazione/scala di un oggetto afferrato (la posa "dopo" è quella
+        /// corrente del target; il chiamante passa la posa "prima" catturata all'inizio
+        /// della presa). Undo ripristina la posa "prima", redo quella "dopo".
+        /// </summary>
+        public static void PushTransform(Transform target,
+            Vector3 posBefore, Quaternion rotBefore, Vector3 scaleBefore)
+            => Add(new Action
+            {
+                poseTarget = target,
+                posBefore = posBefore, rotBefore = rotBefore, scaleBefore = scaleBefore,
+                posAfter = target.position, rotAfter = target.rotation, scaleAfter = target.localScale,
+            });
 
         static void Add(Action action)
         {
@@ -96,13 +119,27 @@ namespace MixedRealityProject.Drawing
             }
         }
 
-        // Forward (esegui/redo): mostra gli aggiunti, nasconde i rimossi, riunisce.
+        // Forward (esegui/redo): mostra gli aggiunti, nasconde i rimossi, riunisce, riposa.
         static bool ApplyForward(Action a)
-            => SetActive(a.added, true) | SetActive(a.removed, false) | ApplyMerge(a, true);
+            => SetActive(a.added, true) | SetActive(a.removed, false) | ApplyMerge(a, true) | ApplyPose(a, true);
 
-        // Reverse (undo): mostra i rimossi, nasconde gli aggiunti, separa.
+        // Reverse (undo): mostra i rimossi, nasconde gli aggiunti, separa, riposa.
         static bool ApplyReverse(Action a)
-            => SetActive(a.removed, true) | SetActive(a.added, false) | ApplyMerge(a, false);
+            => SetActive(a.removed, true) | SetActive(a.added, false) | ApplyMerge(a, false) | ApplyPose(a, false);
+
+        // Riapplica/annulla uno spostamento. forward = posa "dopo"; reverse = posa "prima".
+        // Ritorna true se ha agito (così l'azione non viene "saltata"); false se il target
+        // è stato distrutto.
+        static bool ApplyPose(Action a, bool forward)
+        {
+            if (a.poseTarget == null)
+                return false;
+            a.poseTarget.SetPositionAndRotation(
+                forward ? a.posAfter : a.posBefore,
+                forward ? a.rotAfter : a.rotBefore);
+            a.poseTarget.localScale = forward ? a.scaleAfter : a.scaleBefore;
+            return true;
+        }
 
         // Riapplica/annulla un'unione magnete. forward = unisci (child sotto newParent,
         // via il suo DrawnItem); reverse = separa (child torna a oldParent, DrawnItem
