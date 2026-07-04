@@ -29,8 +29,8 @@ namespace MixedRealityProject.Drawing
                 case "mirror-mode": MirrorMode(); break;
                 case "grid-mode": GridMode(); break;
                 case "line-mode": LineMode(); break;
-                case "undo": Arc(false); break;
-                case "redo": Arc(true); break;
+                case "undo": Arc(true); break;
+                case "redo": Arc(false); break;
                 case "save": SaveLoad(down: true); break;
                 case "load": SaveLoad(down: false); break;
                 case "clear": Trash(); break;
