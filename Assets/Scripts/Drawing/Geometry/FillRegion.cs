@@ -105,7 +105,7 @@ namespace MixedRealityProject.Drawing
             if (!FitPlane(records, seed, out var u, out var v, out _))
                 return null;
 
-            var segs = new List<(Vector2 a, Vector2 b)>();
+            var segs = new List<(Vector2 a, Vector2 b, int recA, int recB)>();
             var ends = new List<(Vector2 p, int rec)>();  // estremi liberi (per il bridging)
             float minx = float.MaxValue, miny = float.MaxValue, maxx = float.MinValue, maxy = float.MinValue;
             for (int ri = 0; ri < records.Count; ri++)
@@ -119,7 +119,7 @@ namespace MixedRealityProject.Drawing
                 for (int i = 1; i < m; i++)
                 {
                     Vector2 cur = Project(t.TransformPoint(rec.points[i]), seed, u, v);
-                    segs.Add((prev, cur));
+                    segs.Add((prev, cur, ri, ri));
                     Accum(cur, ref minx, ref miny, ref maxx, ref maxy);
                     if (i == 1) second = cur;
                     secondLast = prev;
@@ -137,13 +137,13 @@ namespace MixedRealityProject.Drawing
                     if (d0.sqrMagnitude > 1e-8f)
                     {
                         Vector2 e = first + d0.normalized * GapExtend;
-                        segs.Add((first, e)); Accum(e, ref minx, ref miny, ref maxx, ref maxy);
+                        segs.Add((first, e, ri, ri)); Accum(e, ref minx, ref miny, ref maxx, ref maxy);
                     }
                     Vector2 d1 = last - secondLast;
                     if (d1.sqrMagnitude > 1e-8f)
                     {
                         Vector2 e = last + d1.normalized * GapExtend;
-                        segs.Add((last, e)); Accum(e, ref minx, ref miny, ref maxx, ref maxy);
+                        segs.Add((last, e, ri, ri)); Accum(e, ref minx, ref miny, ref maxx, ref maxy);
                     }
                 }
             }
@@ -165,7 +165,7 @@ namespace MixedRealityProject.Drawing
                     if (d < bestD) { bestD = d; bestJ = j; }
                 }
                 if (bestJ >= 0)
-                    segs.Add((ends[i].p, ends[bestJ].p));
+                    segs.Add((ends[i].p, ends[bestJ].p, ends[i].rec, ends[bestJ].rec));
             }
 
             minx = Mathf.Max(minx, -searchRadius); miny = Mathf.Max(miny, -searchRadius);
@@ -187,9 +187,10 @@ namespace MixedRealityProject.Drawing
             }
 
             var wall = new bool[W * H];
+            var owner = new byte[W * H]; // indice del tratto che ha stampato la cella (valido solo dove wall è true)
             const int tpx = 1;   // muro sottile: appena stagno per il flood 4-connesso
             foreach (var s in segs)
-                StampSegment(wall, W, H, s.a, s.b, minx, miny, cell, tpx);
+                StampSegment(wall, owner, W, H, s.a, s.b, minx, miny, cell, tpx, s.recA, s.recB);
 
             int sx = Mathf.FloorToInt((0f - minx) / cell);
             int sy = Mathf.FloorToInt((0f - miny) / cell);
@@ -204,11 +205,27 @@ namespace MixedRealityProject.Drawing
             // Niente dilatazione: coi muri sottili il flood arriva già sulla linea mediana del
             // tratto, che poi lo copre. Dilatare arrotonderebbe di nuovo gli angoli convessi.
 
+            // Il fill si aggancia all'oggetto che DELIMITA davvero l'area: contano solo i
+            // tratti i cui muri toccano la regione allagata, non tutti quelli entro il raggio
+            // di ricerca (un oggetto estraneo lì vicino non deve impedire l'aggancio).
+            var touches = new bool[records.Count];
+            for (int y = 1; y < H - 1; y++)
+                for (int x = 1; x < W - 1; x++)
+                {
+                    int i = y * W + x;
+                    if (!region[i]) continue;
+                    if (wall[i + 1]) touches[owner[i + 1]] = true;
+                    if (wall[i - 1]) touches[owner[i - 1]] = true;
+                    if (wall[i + W]) touches[owner[i + W]] = true;
+                    if (wall[i - W]) touches[owner[i - W]] = true;
+                }
+
             Transform root = null;
             bool single = true;
-            foreach (var rec in records)
+            for (int ri = 0; ri < records.Count; ri++)
             {
-                var item = rec.GetComponentInParent<DrawnItem>();
+                if (!touches[ri]) continue;
+                var item = records[ri].GetComponentInParent<DrawnItem>();
                 var r = item != null ? item.transform : null;
                 if (root == null) root = r;
                 else if (r != root) { single = false; break; }
@@ -378,9 +395,11 @@ namespace MixedRealityProject.Drawing
             if (p.y < miny) miny = p.y; if (p.y > maxy) maxy = p.y;
         }
 
-        // Disegna un segmento come linea spessa (dischetti lungo il percorso).
-        static void StampSegment(bool[] wall, int W, int H, Vector2 a, Vector2 b,
-            float minx, float miny, float cell, int tpx)
+        // Disegna un segmento come linea spessa (dischetti lungo il percorso), annotando in
+        // 'owner' il tratto proprietario di ogni cella. I ponti tra tratti diversi hanno un
+        // proprietario per metà: la metà verso ciascun estremo appartiene al suo tratto.
+        static void StampSegment(bool[] wall, byte[] owner, int W, int H, Vector2 a, Vector2 b,
+            float minx, float miny, float cell, int tpx, int recA, int recB)
         {
             float ax = (a.x - minx) / cell, ay = (a.y - miny) / cell;
             float bx = (b.x - minx) / cell, by = (b.y - miny) / cell;
@@ -388,12 +407,13 @@ namespace MixedRealityProject.Drawing
             for (int i = 0; i <= steps; i++)
             {
                 float t = (float)i / steps;
-                Stamp(wall, W, H, Mathf.RoundToInt(Mathf.Lerp(ax, bx, t)),
-                                   Mathf.RoundToInt(Mathf.Lerp(ay, by, t)), tpx);
+                Stamp(wall, owner, W, H, Mathf.RoundToInt(Mathf.Lerp(ax, bx, t)),
+                                   Mathf.RoundToInt(Mathf.Lerp(ay, by, t)), tpx,
+                                   (byte)(t <= 0.5f ? recA : recB));
             }
         }
 
-        static void Stamp(bool[] wall, int W, int H, int cx, int cy, int r)
+        static void Stamp(bool[] wall, byte[] owner, int W, int H, int cx, int cy, int r, byte rec)
         {
             for (int dy = -r; dy <= r; dy++)
                 for (int dx = -r; dx <= r; dx++)
@@ -401,7 +421,10 @@ namespace MixedRealityProject.Drawing
                     if (dx * dx + dy * dy > r * r) continue;
                     int x = cx + dx, y = cy + dy;
                     if (x >= 0 && y >= 0 && x < W && y < H)
+                    {
                         wall[y * W + x] = true;
+                        owner[y * W + x] = rec;
+                    }
                 }
         }
 
