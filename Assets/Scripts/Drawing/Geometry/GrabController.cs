@@ -34,6 +34,88 @@ namespace MixedRealityProject.Drawing
         Transform hovered;
         Transform mergeTarget; // candidato all'unione mentre tieni un oggetto (magnete post-disegno)
 
+        // Pennello sulla stessa mano (null sulla mano-palette): mentre disegna, hover e presa
+        // vanno sospesi — la sonda sulla punta aggancerebbe a intermittenza i collider del
+        // tratto IN CORSO, facendone sfarfallare il colore (highlight 1.2× on/off).
+        BrushController brush;
+
+        void Awake() => brush = GetComponent<BrushController>();
+
+        // --- Sovrapposizione oggetto-oggetto (magnete di precisione) ---
+        // Oltre alla sonda mano/punta, mentre tieni un oggetto si rileva anche la
+        // SOVRAPPOSIZIONE dell'oggetto tenuto con un altro disegno: i suoi collider di
+        // presa vengono esaminati a lotti (round-robin → costo costante per frame anche su
+        // disegni ricchi) cercando contatti con i collider di altri DrawnItem. Basta che le
+        // strutture si tocchino appena perché il bersaglio si evidenzi (viola); il rilascio
+        // conferma l'unione. L'aggancio è immediato; lo sgancio avviene solo a fine ciclo
+        // completo di scansione (isteresi anti-sfarfallio dell'evidenziazione).
+        readonly List<Collider> heldColliders = new();
+        int scanIndex;
+        Transform scanFound;     // bersaglio visto nel ciclo di scansione corrente
+        Transform overlapTarget; // esito dell'ultimo ciclo completo
+        const int ScanPerFrame = 24;        // collider dell'oggetto tenuto esaminati per frame
+        const float OverlapMargin = 0.004f; // tolleranza extra: la "piccola sovrapposizione"
+
+        // Fotografa i collider dell'oggetto appena afferrato (non cambiano durante la presa).
+        void BeginOverlapScan()
+        {
+            heldColliders.Clear();
+            if (holding != null)
+                holding.GetComponentsInChildren(false, heldColliders);
+            scanIndex = 0;
+            scanFound = null;
+            overlapTarget = null;
+        }
+
+        void EndOverlapScan()
+        {
+            heldColliders.Clear();
+            scanFound = null;
+            overlapTarget = null;
+        }
+
+        // Avanza la scansione di un lotto e ritorna il disegno attualmente sovrapposto
+        // all'oggetto tenuto (o null). Il primo contatto aggancia subito; il bersaglio si
+        // sgancia solo quando un intero ciclo di scansione non trova più contatti.
+        Transform ScanHeldOverlap()
+        {
+            int count = heldColliders.Count;
+            if (count == 0)
+                return null;
+            int checks = Mathf.Min(ScanPerFrame, count);
+            for (int n = 0; n < checks; n++)
+            {
+                var col = heldColliders[scanIndex];
+                bool cycleEnd = ++scanIndex >= count;
+                if (cycleEnd)
+                    scanIndex = 0;
+
+                if (col != null && col.enabled && col.gameObject.activeInHierarchy)
+                {
+                    var b = col.bounds;
+                    float r = Mathf.Max(b.extents.x, Mathf.Max(b.extents.y, b.extents.z)) + OverlapMargin;
+                    int hits = Physics.OverlapSphereNonAlloc(b.center, r, overlapBuffer,
+                        Physics.AllLayers, QueryTriggerInteraction.Collide);
+                    for (int i = 0; i < hits; i++)
+                    {
+                        var root = GrabRoot(overlapBuffer[i]);
+                        if (root == null || root.GetComponent<DrawnItem>() == null || !IsMergeable(root))
+                            continue;
+                        scanFound = root;
+                        overlapTarget = root; // aggancio immediato
+                        break;
+                    }
+                }
+
+                if (cycleEnd)
+                {
+                    overlapTarget = scanFound; // sgancio solo a ciclo completo senza contatti
+                    scanFound = null;
+                }
+            }
+            return overlapTarget;
+        }
+
         // Haptic state
         float hapticTimer;
         float hapticFreq;
@@ -62,12 +144,14 @@ namespace MixedRealityProject.Drawing
                     OVRInput.SetControllerVibration(0f, 0f, controller);
             }
 
-            // Vicino alla palette o al foglio a quadretti (o mentre li si trascina) la
-            // mano-pennello NON afferra i tratti: il grip è riservato allo spostamento del
-            // pannello. Non interrompe una presa già in corso (holding != null), così se
-            // stavi già spostando un tratto lo concludi.
+            // Vicino alla palette o al foglio a quadretti (o mentre li si trascina), o MENTRE
+            // IL PENNELLO STA DISEGNANDO, la mano-pennello NON fa hover né afferra i tratti:
+            // il grip è riservato allo spostamento del pannello, e durante il tratto l'hover
+            // aggancerebbe a intermittenza il tratto in corso facendolo sfarfallare. Non
+            // interrompe una presa già in corso (holding != null).
             if (controller == StrokeSettings.BrushHand
-                && (PaletteController.SuppressBrushGrab || ReferenceGrid.SuppressBrushGrab)
+                && (PaletteController.SuppressBrushGrab || ReferenceGrid.SuppressBrushGrab
+                    || (brush != null && brush.IsDrawing))
                 && holding == null)
             {
                 SetHover(null);
@@ -85,6 +169,7 @@ namespace MixedRealityProject.Drawing
                     SetHover(null);
                     StrokeHighlight.Set(holding, 1.45f);
                     GrabSession.Add(holding, this);
+                    BeginOverlapScan(); // magnete di precisione: scandisce le sovrapposizioni
                     // Impulso di conferma presa: breve e deciso
                     HapticPulse(0.05f, frequency: 0.6f, amplitude: 0.7f);
                 }
@@ -144,6 +229,7 @@ namespace MixedRealityProject.Drawing
                 StrokeHighlight.Clear(holding);
             mergeTarget = null;
             holding = null;
+            EndOverlapScan();
 
             // Unione: impulso deciso (conferma); rilascio semplice: impulso morbido.
             if (merged)
@@ -152,11 +238,14 @@ namespace MixedRealityProject.Drawing
                 HapticPulse(0.03f, frequency: 0.2f, amplitude: 0.3f);
         }
 
-        // Mentre tieni un oggetto: trova un altro oggetto disegnato vicino alla mano e lo
-        // evidenzia col colore "magnete". Si aggiorna solo al cambio di candidato.
+        // Mentre tieni un oggetto: trova un altro oggetto disegnato vicino alla mano O
+        // sovrapposto (anche di poco) all'oggetto tenuto, e lo evidenzia col colore
+        // "magnete". Si aggiorna solo al cambio di candidato; il rilascio conferma l'unione.
         void UpdateMergeCandidate()
         {
             Transform found = FindMergeCandidate();
+            if (found == null)
+                found = ScanHeldOverlap(); // magnete di precisione: sovrapposizione strutture
             if (found == mergeTarget)
                 return;
             if (mergeTarget != null && !GrabSession.IsHeld(mergeTarget))
@@ -169,8 +258,10 @@ namespace MixedRealityProject.Drawing
             }
         }
 
-        // Oggetto disegnato (DrawnItem) più vicino alla mano, diverso da quello tenuto e non
-        // imparentato con esso. Lo specchio (MirrorHandle) è escluso: non si unisce.
+        // Oggetto disegnato (DrawnItem) su cui fondere ciò che si tiene, diverso da quello
+        // tenuto e non imparentato con esso. Prima cerca per contatto sui collider dei tratti
+        // (il contorno); se non trova nulla, ripiega sull'AREA RIEMPITA (vedi FillOwnerAt).
+        // Lo specchio (MirrorHandle) è escluso: non si unisce.
         Transform FindMergeCandidate()
         {
             if (holding == null)
@@ -181,16 +272,34 @@ namespace MixedRealityProject.Drawing
             for (int i = 0; i < count; i++)
             {
                 var root = GrabRoot(overlapBuffer[i]);
-                if (root == null || root == holding)
-                    continue;
-                if (root.GetComponent<DrawnItem>() == null) // solo oggetti disegnati (no specchio)
-                    continue;
-                if (root.IsChildOf(holding) || holding.IsChildOf(root))
-                    continue;
-                return root;
+                if (root != null && root.GetComponent<DrawnItem>() != null && IsMergeable(root))
+                    return root; // solo oggetti disegnati (no specchio)
+            }
+            // Il riempimento non ha collider (vedi FillSurface), quindi l'OverlapSphere sopra
+            // non lo trova: se la punta è dentro un'area colorata ci si aggancia comunque.
+            return FillOwnerAt(probe);
+        }
+
+        // Disegno (DrawnItem) proprietario di un riempimento la cui area colorata contiene la
+        // punta ed è entro mergeRadius dalla superficie; null altrimenti. Così si può fondere
+        // portando un disegno sopra la parte fillata di un altro, non solo sul contorno.
+        Transform FillOwnerAt(Vector3 probe)
+        {
+            foreach (var fill in FillRegion.CoveringFills(probe, holding.gameObject))
+            {
+                var renderer = fill.GetComponent<Renderer>();
+                if (renderer != null && renderer.bounds.SqrDistance(probe) > mergeRadius * mergeRadius)
+                    continue; // fill lontano (complanare): non agganciare
+                var item = fill.GetComponentInParent<DrawnItem>();
+                if (item != null && IsMergeable(item.transform))
+                    return item.transform;
             }
             return null;
         }
+
+        // Bersaglio valido per l'unione: non è l'oggetto tenuto né imparentato con esso.
+        bool IsMergeable(Transform root) =>
+            root != holding && !root.IsChildOf(holding) && !holding.IsChildOf(root);
 
         // L'oggetto afferrato viene mosso in LateUpdate, dopo che il tracking
         // ha aggiornato la posa delle mani in Update.

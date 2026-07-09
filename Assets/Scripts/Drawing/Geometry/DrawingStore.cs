@@ -151,18 +151,26 @@ namespace MixedRealityProject.Drawing
         }
 
         /// <summary>
-        /// Nuovo disegno: svuota la scena (history + tutti gli oggetti disegnati),
-        /// salvando prima un backup automatico così un tocco accidentale su Clear non
-        /// distrugge il lavoro in modo irreversibile.
+        /// Nuovo disegno: svuota la scena come UNA singola azione di gomma annullabile
+        /// (Undo la ripristina tutta in un colpo), salvando prima anche un backup su file
+        /// come ulteriore rete di sicurezza. Riusa il modello della gomma: gli oggetti non
+        /// vengono distrutti ma nascosti, e restano recuperabili finché l'azione è nello
+        /// stack di undo (MaxUndo) o finché non si svuota di nuovo.
         /// </summary>
         public static void NewScene()
         {
             SaveBackup();
-            StrokeHistory.Clear();
-            foreach (var item in UnityEngine.Object.FindObjectsByType<DrawnItem>(
-                         FindObjectsInactive.Include, FindObjectsSortMode.None))
-                UnityEngine.Object.Destroy(item.gameObject);
-            Debug.Log("[DrawingStore] Scena svuotata (backup salvato in drawing_backup.json).");
+            // Solo gli oggetti attivi (i visibili): gli inattivi sono già "undo-ati" nel
+            // ramo redo e verranno liberati da PushErase→ClearRedo.
+            var active = new List<GameObject>();
+            foreach (var item in UnityEngine.Object.FindObjectsByType<DrawnItem>(FindObjectsSortMode.None))
+                active.Add(item.gameObject);
+            if (active.Count == 0)
+                return;
+            foreach (var go in active)
+                go.SetActive(false); // nascondi, non distruggere: così Undo può riattivarli
+            StrokeHistory.PushErase(active.ToArray()); // un solo passo di undo per tutta la scena
+            Debug.Log($"[DrawingStore] Scena svuotata ({active.Count} oggetti, annullabile).");
             // Niente toast: la scena che si svuota è già feedback evidente.
         }
 

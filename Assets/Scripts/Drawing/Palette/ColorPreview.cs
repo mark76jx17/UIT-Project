@@ -14,11 +14,18 @@ namespace MixedRealityProject.Drawing
     {
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
+        // In Cancella/Elimina il colore non c'entra: l'anteprima diventa un grigio
+        // trasparente con l'icona dello strumento (gomma o ✕, le stesse dei bottoni).
+        static readonly Color EraseGray = new(0.62f, 0.62f, 0.68f, 0.40f);
+
         Transform swatch;
         Material swatchMat;
         float minSize, maxSize;
         Transform border;
         float borderPadding;
+        GameObject icon;
+        Material iconMat;
+        ToolMode lastIconTool = (ToolMode)(-1);
 
         public void Build(Vector2 box)
         {
@@ -45,6 +52,17 @@ namespace MixedRealityProject.Drawing
             minSize = maxSize * 0.22f;
             borderPadding = maxSize * 0.08f;
 
+            // Icona dello strumento (gomma/✕), mostrata solo in Cancella/Elimina.
+            icon = new GameObject("ToolIcon");
+            icon.transform.SetParent(transform, false);
+            icon.transform.localPosition = new Vector3(0f, 0f, -0.006f);
+            float iconSize = maxSize * 0.55f;
+            icon.AddComponent<MeshFilter>().mesh = RoundedMesh.TexturedQuad(iconSize, iconSize);
+            iconMat = BrushMaterials.CreateUnlit(Color.white, opaque: false);
+            BrushMaterials.PreserveDestAlpha(iconMat); // niente "buco" nel passthrough
+            icon.AddComponent<MeshRenderer>().material = iconMat;
+            icon.SetActive(false);
+
             Apply(); // stato iniziale (utile anche in edit mode, dove Update non gira)
         }
 
@@ -54,6 +72,31 @@ namespace MixedRealityProject.Drawing
         {
             if (swatchMat == null || swatch == null || border == null)
                 return;
+
+            var tool = StrokeSettings.Tool;
+            bool erasing = tool == ToolMode.Eraser || tool == ToolMode.Delete;
+
+            if (erasing)
+            {
+                // Grigio trasparente + icona dello strumento: "qui non si sceglie un colore".
+                swatchMat.SetColor(BaseColorId, EraseGray);
+                float sz = maxSize * 0.85f;
+                border.localScale = new Vector3(sz + borderPadding, sz + borderPadding, 1f);
+                swatch.localScale = new Vector3(sz, sz, 1f);
+                if (icon != null && tool != lastIconTool)
+                {
+                    lastIconTool = tool;
+                    iconMat.mainTexture = ToolIcon.Get(tool == ToolMode.Delete ? "close" : "eraser");
+                    icon.SetActive(true);
+                }
+                return;
+            }
+
+            if (icon != null && icon.activeSelf)
+            {
+                icon.SetActive(false);
+                lastIconTool = (ToolMode)(-1);
+            }
 
             swatchMat.SetColor(BaseColorId, StrokeSettings.Color);
 

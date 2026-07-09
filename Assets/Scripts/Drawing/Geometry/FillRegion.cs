@@ -699,6 +699,20 @@ namespace MixedRealityProject.Drawing
             return result;
         }
 
+        /// <summary>Riempimenti (isFill) attivi in scena: snapshot per il rilevamento della
+        /// fusione durante il disegno (i fill non hanno collider e non cambiano nel tratto).</summary>
+        public static List<StrokeRecord> ActiveFills()
+        {
+            var result = new List<StrokeRecord>();
+            foreach (var rec in Object.FindObjectsByType<StrokeRecord>(FindObjectsInactive.Exclude))
+                if (rec.isFill)
+                    result.Add(rec);
+            return result;
+        }
+
+        /// <summary>True se il punto (mondo) cade nell'area colorata del riempimento (fuori dai buchi).</summary>
+        public static bool Covers(StrokeRecord fill, Vector3 point) => PointInFill(fill, point);
+
         static bool PointInFill(StrokeRecord rec, Vector3 seed)
         {
             if (rec.points.Count < 3)

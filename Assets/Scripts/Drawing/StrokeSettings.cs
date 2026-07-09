@@ -83,6 +83,7 @@ namespace MixedRealityProject.Drawing
             Hue = hue;
             Sat = sat;
             Val = val;
+            ReactivatePen();
         }
 
         public static void SetColor(Color color)
@@ -91,6 +92,19 @@ namespace MixedRealityProject.Drawing
             Hue = h;
             Sat = s;
             Val = 0.5f; // i recenti sono colori pieni → luminosità neutra
+            ReactivatePen();
+        }
+
+        // Scegliere un colore (ruota, luminosità, recenti, contagocce) mentre si è in
+        // Gomma/Elimina riattiva il pennello: la zona colore resta sempre attiva in palette
+        // (niente overlay di disattivazione, confondeva gli utenti) e toccarla esprime
+        // l'intenzione di disegnare. La UI segue da sola (pulsante Draw, icona sulla punta,
+        // controlli draw-only), quindi il passaggio è fluido. In Fill il colore serve al
+        // secchiello: non si cambia strumento.
+        static void ReactivatePen()
+        {
+            if (Tool == ToolMode.Eraser || Tool == ToolMode.Delete)
+                Tool = ToolMode.Pen;
         }
 
         /// <summary>

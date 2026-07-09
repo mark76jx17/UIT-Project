@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace MixedRealityProject.Drawing
@@ -70,8 +71,20 @@ namespace MixedRealityProject.Drawing
         [SerializeField] bool contourRingFill = false;
 
         [Header("Gomma")]
-        [Tooltip("Raggio entro cui la gomma toglie i punti del tratto (cancellazione parziale).")]
-        [SerializeField] float eraseRadius = 0.03f;
+        [Tooltip("Margine aggiunto al raggio della punta per la gomma: il raggio effettivo " +
+                 "segue lo slider Size (area coperta dalla punta) più questo margine per " +
+                 "raggiungere la linea mediana dei tratti.")]
+        [SerializeField] float eraseMargin = 0.006f;
+
+        // La gomma cancella l'area coperta dalla punta SECONDO LA DIMENSIONE SCELTA
+        // (slider Size), non un raggio fisso: punta piccola = gomma di precisione,
+        // punta grande = gomma larga.
+        float EraseRadius => StrokeSettings.FixedRadius + eraseMargin;
+
+        [Tooltip("Elimina: una volta evidenziato in rosso, il bersaglio resta agganciato " +
+                 "finché la punta è entro questo raggio (isteresi: niente rosso che va e " +
+                 "viene ai bordi della zona di rilevamento).")]
+        [SerializeField] float deleteHoverExit = 0.06f;
 
         [Header("Campionamento adattivo")]
         [Tooltip("Velocità controller (m/s) oltre cui la distanza minima scende al valore minimo.")]
@@ -113,6 +126,10 @@ namespace MixedRealityProject.Drawing
         float currentRadius;
         Transform mergeTarget;
         bool mirrorStartOnPlane;
+        // Snapshot dei fill catturato a inizio tratto: per rilevare, durante il disegno, se il
+        // tratto passa sopra un'area riempita (i fill non hanno collider e non cambiano nel
+        // tratto). Null se non serve (magnete off o già agganciato alla partenza).
+        List<StrokeRecord> fillSnapshot;
 
         bool fillConsumed;     // un solo riempimento per pressione del trigger
         Transform fillHover;   // tratto chiuso attualmente evidenziato in modo Fill
@@ -237,7 +254,8 @@ namespace MixedRealityProject.Drawing
             // Aiuti visivi che vanno spenti ogni frame e riaccesi solo dove servono.
             if (snapHint != null)
                 snapHint.gameObject.SetActive(false);
-            if (!StrokeSettings.EraserMode && eraseHover != null)
+            // L'anteprima rossa vive solo in ELIMINA: fuori da lì va spenta.
+            if (!StrokeSettings.DeleteMode && eraseHover != null)
             {
                 StrokeHighlight.Clear(eraseHover);
                 eraseHover = null;
@@ -308,7 +326,8 @@ namespace MixedRealityProject.Drawing
                 // Cambio modalità a metà tratto: chiudi il tratto in corso.
                 if (pressed)
                     EndPress(position);
-                UpdateEraseHover(position); // evidenzia in rosso cosa cancellerai
+                // Niente anteprima rossa in Cancella (richiesta utente): la gomma toglie solo
+                // l'area coperta, tingere la struttura era fuorviante. Il rosso resta in Elimina.
                 if (trigger >= pressThreshold)
                     EraseAt(position);
                 return;
@@ -389,17 +408,43 @@ namespace MixedRealityProject.Drawing
             }
         }
 
-        // Evidenzia in rosso l'oggetto che la gomma cancellerebbe sotto la punta.
+        // Evidenzia in rosso l'INTERO oggetto che ELIMINA rimuoverebbe sotto la punta.
+        // (Solo per Delete: in Cancella l'anteprima rossa è stata tolta su richiesta —
+        // la gomma toglie l'area coperta, non l'oggetto.)
+        // ISTERESI: l'aggancio avviene entro snapRadius (preciso), ma una volta rosso il
+        // bersaglio resta agganciato finché la punta è entro deleteHoverExit (più ampio) —
+        // niente evidenziazione che va e viene ai bordi; un tick aptico conferma l'aggancio.
         void UpdateEraseHover(Vector3 position)
         {
-            Transform found = FindNearbyItem(position, out var target, out _) ? target : null;
+            Transform found = null;
+            if (eraseHover != null && IsWithin(position, deleteHoverExit, eraseHover))
+                found = eraseHover; // resta agganciato al bersaglio corrente
+            if (found == null)
+                found = FindNearbyItem(position, out var target, out _) ? target : null;
             if (eraseHover == found)
                 return;
             if (eraseHover != null)
                 StrokeHighlight.Clear(eraseHover);
             eraseHover = found;
             if (eraseHover != null)
+            {
                 StrokeHighlight.SetEraseHover(eraseHover);
+                HapticPulse(0.02f, frequency: 0.5f, amplitude: 0.35f); // "bersaglio agganciato"
+            }
+        }
+
+        // La punta è entro 'radius' da un collider di QUESTO oggetto?
+        bool IsWithin(Vector3 position, float radius, Transform root)
+        {
+            int count = Physics.OverlapSphereNonAlloc(position, radius, overlapBuffer,
+                Physics.AllLayers, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < count; i++)
+            {
+                var item = overlapBuffer[i].GetComponentInParent<DrawnItem>();
+                if (item != null && item.transform == root)
+                    return true;
+            }
+            return false;
         }
 
         // Contagocce: preleva il colore del tratto sotto la punta e lo imposta come corrente.
@@ -470,6 +515,10 @@ namespace MixedRealityProject.Drawing
                 HapticPulse(hapticStrokeDuration, frequency: 0.4f, amplitude: 0.5f);
             }
 
+            // Snapshot dei fill per rilevare, durante il disegno, se il tratto passa sopra
+            // un'area colorata; serve solo se non ci si è già agganciati alla partenza.
+            fillSnapshot = (mergeNearbyStrokes && mergeTarget == null) ? FillRegion.ActiveFills() : null;
+
             // Line + Grid: se la punta è in range del foglio, il tratto nasce appoggiato
             // alla carta (e ci resta: vedi lineOnSheet). La proiezione vince sul magnete.
             lineStroke = StrokeSettings.SnapAxis;
@@ -502,6 +551,11 @@ namespace MixedRealityProject.Drawing
             // editor; l'esponente su Time.deltaTime normalizza il risultato.
             float smoothAlpha = 1f - Mathf.Pow(1f - smoothing, Time.deltaTime * 72f);
             smoothed = Vector3.Lerp(smoothed, position, smoothAlpha);
+
+            // Fusione all'intersezione: se non sono ancora agganciato, la prima figura che il
+            // tratto attraversa (contorno o area riempita) diventa il bersaglio della fusione.
+            if (mergeTarget == null && mergeNearbyStrokes)
+                DetectMergeWhileDrawing(position);
 
             // Line: linea ELASTICA — il tratto è il segmento start→punta che segue il
             // controller in qualsiasi direzione (oblique incluse; il vecchio ConstrainToAxis
@@ -633,7 +687,10 @@ namespace MixedRealityProject.Drawing
 
         void DeleteAt(Vector3 position)
         {
-            if (!FindNearbyItem(position, out var target, out _))
+            // Coerenza col rosso: si elimina ESATTAMENTE ciò che è evidenziato (l'isteresi
+            // dell'hover può tenerlo agganciato poco oltre il raggio d'ingresso).
+            Transform target = eraseHover;
+            if (target == null && !FindNearbyItem(position, out target, out _))
                 return;
 
             StrokeHighlight.Clear(target);
@@ -649,28 +706,168 @@ namespace MixedRealityProject.Drawing
 
         void EraseAt(Vector3 position)
         {
-            if (!FindNearbyItem(position, out var target, out _))
+            if (!FindNearbyPart(position, EraseRadius, out var target, out var part))
                 return;
             // Togli prima l'evidenziazione rossa, o riapparirebbe rossa dopo un undo.
             StrokeHighlight.Clear(target);
-            if (eraseHover == target)
-                eraseHover = null;
-
-            // Cancellazione PARZIALE su un tratto semplice (non unito col magnete): toglie
-            // solo la porzione toccata e ricostruisce i pezzi rimasti. Altrimenti
-            // cancella tutto l'oggetto. In entrambi i casi è annullabile.
-            var strokes = target.GetComponentsInChildren<Stroke>();
-            if (strokes.Length == 1 && strokes[0].TryEraseSphere(position, eraseRadius, out var pieces))
+            if (eraseHover != null)
             {
-                target.gameObject.SetActive(false);
-                StrokeHistory.PushReplace(new[] { target.gameObject }, pieces.ToArray());
+                StrokeHighlight.Clear(eraseHover);
+                eraseHover = null;
+            }
+
+            // Cancellazione PARZIALE: si toglie solo l'area coperta dalla punta (raggio dallo
+            // slider Size). Sui gruppi fusi si erode la SOLA parte colpita, non l'intera entità.
+            if (part == target && !Stroke.HasRealChildren(target))
+            {
+                // Oggetto semplice (nessun sotto-oggetto fuso): comportamento storico —
+                // i pezzi rimasti diventano oggetti indipendenti (la gomma "taglia in due").
+                var s = target.GetComponent<Stroke>();
+                if (s != null && s.TryEraseSphere(position, EraseRadius, out var pieces, ensureProgress: true))
+                {
+                    target.gameObject.SetActive(false);
+                    StrokeHistory.PushReplace(new[] { target.gameObject }, pieces.ToArray());
+                }
+                else
+                {
+                    // Non erodibile (punto, fill, anelli): si toglie l'oggetto intero.
+                    target.gameObject.SetActive(false);
+                    StrokeHistory.PushErase(target.gameObject);
+                }
+            }
+            else if (part == target)
+            {
+                // Colpita la geometria della RADICE di un gruppo: si ricostruisce il nodo
+                // (pezzi superstiti + cloni dei figli fusi) e si sostituisce atomicamente.
+                var rebuilt = Stroke.EraseNodeAndRebuild(target, position, EraseRadius, out bool erodible);
+                if (!erodible)
+                {
+                    // Radice non erodibile (punto/fillata): non c'è parziale sensata — via tutto.
+                    target.gameObject.SetActive(false);
+                    StrokeHistory.PushErase(target.gameObject);
+                }
+                else
+                {
+                    target.gameObject.SetActive(false);
+                    if (rebuilt != null)
+                        StrokeHistory.PushReplace(new[] { target.gameObject }, new[] { rebuilt });
+                    else
+                        StrokeHistory.PushErase(target.gameObject); // eroso tutto, nessun superstite
+                }
             }
             else
             {
-                target.gameObject.SetActive(false);
-                StrokeHistory.PushErase(target.gameObject);
+                // Colpito un SOTTO-OGGETTO fuso: si nasconde solo quello. I pezzi superstiti
+                // che TOCCANO ancora il resto della struttura rientrano nel blocco; quelli
+                // rimasti fisicamente STACCATI diventano oggetti indipendenti — così Elimina
+                // (e il grab) li trattano da soli invece di prendere l'intera struttura.
+                var stroke = part.GetComponent<Stroke>();
+                var pieces = new System.Collections.Generic.List<GameObject>();
+                bool erodible;
+                if (stroke != null && !Stroke.HasRealChildren(part))
+                {
+                    // Caso tipico (parte semplice): pezzi granulari, ognuno classificato da sé.
+                    erodible = stroke.TryEraseSphere(position, EraseRadius, out pieces, ensureProgress: true);
+                }
+                else
+                {
+                    // Parte con sotto-oggetti annidati: ricostruzione unica (pezzi + cloni).
+                    var rebuilt = Stroke.EraseNodeAndRebuild(part, position, EraseRadius, out erodible);
+                    if (rebuilt != null)
+                        pieces.Add(rebuilt);
+                }
+
+                part.gameObject.SetActive(false);
+                if (!erodible || pieces.Count == 0)
+                {
+                    // Parte non erodibile (fill/anelli/punto) o erosa del tutto: via solo lei.
+                    StrokeHistory.PushErase(part.gameObject);
+                }
+                else
+                {
+                    foreach (var piece in pieces)
+                        AttachIfTouching(piece, target);
+                    StrokeHistory.PushReplace(new[] { part.gameObject }, pieces.ToArray());
+                }
             }
             HapticPulse(hapticStrokeDuration, frequency: 0.5f, amplitude: 0.6f);
+        }
+
+        // Il pezzo superstite resta nel blocco solo se tocca ancora il resto della
+        // struttura; altrimenti resta l'oggetto indipendente creato da Rebuild (col suo
+        // DrawnItem), eliminabile/afferrabile da solo.
+        void AttachIfTouching(GameObject piece, Transform group)
+        {
+            if (!TouchesStructure(piece, group))
+                return;
+            piece.transform.SetParent(group, true); // mantiene la posa nel mondo
+            var item = piece.GetComponent<DrawnItem>();
+            if (item != null)
+                Destroy(item);
+        }
+
+        // Contatto pezzo↔struttura: un punto della polilinea del pezzo entro ContactRadius
+        // dai collider (di presa) della struttura. Si interrogano i collider ESISTENTI del
+        // gruppo dai PUNTI del pezzo, non il contrario: i collider appena creati dal Rebuild
+        // entrano nel broadphase fisico solo al prossimo update e una query li mancherebbe.
+        // (Per lo stesso motivo un pezzo che tocca il gruppo solo attraverso un ALTRO pezzo
+        // appena creato non viene concatenato: caso raro, resta indipendente.)
+        bool TouchesStructure(GameObject piece, Transform group)
+        {
+            const float ContactRadius = 0.005f;
+            foreach (var rec in piece.GetComponentsInChildren<StrokeRecord>())
+            {
+                var t = rec.transform;
+                for (int i = 0; i < rec.points.Count; i += 2)
+                {
+                    Vector3 w = t.TransformPoint(rec.points[i]);
+                    int hits = Physics.OverlapSphereNonAlloc(w, ContactRadius, overlapBuffer,
+                        Physics.AllLayers, QueryTriggerInteraction.Collide);
+                    for (int h = 0; h < hits; h++)
+                    {
+                        var item = overlapBuffer[h].GetComponentInParent<DrawnItem>();
+                        if (item != null && item.transform == group)
+                            return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Oggetto disegnato vicino alla punta E la sua "parte" colpita: il sotto-oggetto
+        /// (tratto/fill/anelli fusi nel gruppo) a cui appartiene il collider toccato.
+        /// part == target per oggetti semplici o quando si tocca la geometria della radice
+        /// (i suoi Cap/GrabCollider). La gomma erode la parte, Delete rimuove il target.
+        /// </summary>
+        bool FindNearbyPart(Vector3 position, float radius, out Transform target, out Transform part)
+        {
+            target = part = null;
+            int count = Physics.OverlapSphereNonAlloc(position, radius, overlapBuffer,
+                Physics.AllLayers, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < count; i++)
+            {
+                var hit = overlapBuffer[i];
+                var item = hit.GetComponentInParent<DrawnItem>();
+                if (item == null)
+                    continue;
+                target = item.transform;
+                // La parte = il portatore di StrokeRecord più vicino al collider (il singolo
+                // tratto/fill, anche annidato). Gli anelli del fill "col pennello" non hanno
+                // record: si risale al figlio diretto della radice che li contiene.
+                var rec = hit.GetComponentInParent<StrokeRecord>();
+                if (rec != null)
+                    part = rec.transform;
+                else
+                {
+                    var p = hit.transform;
+                    while (p != target && p.parent != target)
+                        p = p.parent;
+                    part = p;
+                }
+                return true;
+            }
+            return false;
         }
 
         // Secchiello: riempie l'area chiusa puntata col colore corrente.
@@ -812,5 +1009,47 @@ namespace MixedRealityProject.Drawing
             snapped = position;
             return false;
         }
+
+        // Durante il disegno: se il tratto non è ancora agganciato a una figura, la prima che
+        // interseca diventa il bersaglio della fusione (a fine tratto entra nella sua gerarchia,
+        // vedi EndPress). Prova prima il contorno (collider di un altro tratto entro snapRadius),
+        // poi l'area riempita (snapshot dei fill). Il tratto in corso e il gemello speculare sono
+        // esclusi: man mano che li disegno hanno già i loro collider.
+        void DetectMergeWhileDrawing(Vector3 position)
+        {
+            Transform found = null;
+
+            int count = Physics.OverlapSphereNonAlloc(position, snapRadius, overlapBuffer,
+                Physics.AllLayers, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < count && found == null; i++)
+            {
+                var item = overlapBuffer[i].GetComponentInParent<DrawnItem>();
+                if (item != null && !IsCurrentStroke(item.transform))
+                    found = item.transform;
+            }
+
+            if (found == null && fillSnapshot != null)
+                foreach (var fill in fillSnapshot)
+                {
+                    if (fill == null || !fill.gameObject.activeInHierarchy || !FillRegion.Covers(fill, position))
+                        continue;
+                    var item = fill.GetComponentInParent<DrawnItem>();
+                    if (item != null && !IsCurrentStroke(item.transform))
+                    {
+                        found = item.transform;
+                        break;
+                    }
+                }
+
+            if (found == null)
+                return;
+            mergeTarget = found;
+            HapticPulse(hapticSnapDuration, frequency: 0.8f, amplitude: 0.8f); // conferma tattile dell'aggancio
+        }
+
+        // Il tratto che sto disegnando (o il suo gemello speculare)?
+        bool IsCurrentStroke(Transform root) =>
+            (current != null && root == current.transform)
+            || (mirrored != null && root == mirrored.transform);
     }
 }

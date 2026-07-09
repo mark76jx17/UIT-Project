@@ -268,35 +268,67 @@ namespace MixedRealityProject.Drawing
         /// qualcosa; 'pieces' sono i nuovi oggetti. Il chiamante nasconde l'originale.
         /// Salta tratti-punto e tratti riempiti (per quelli si cancella tutto).
         /// </summary>
-        public bool TryEraseSphere(Vector3 center, float radius, out List<GameObject> pieces)
+        // Fonte dati per la gomma: lo StrokeRecord serializzato (points/radii coincidono con
+        // rawPoints dopo Finish, e — a differenza dei campi runtime privati — sopravvive a
+        // un Object.Instantiate del tratto, vedi EraseNodeAndRebuild).
+        StrokeRecord Record => record != null ? record : record = GetComponent<StrokeRecord>();
+
+        public bool TryEraseSphere(Vector3 center, float radius, out List<GameObject> pieces,
+            bool ensureProgress = false)
         {
             pieces = new List<GameObject>();
-            if (record == null || record.isPoint || record.filled || rawPoints.Count < 2)
+            var rec = Record;
+            if (rec == null || rec.isPoint || rec.filled || rec.points.Count < 2
+                || rec.radii.Count != rec.points.Count)
                 return false;
 
             // I punti sono in spazio locale del tratto: porto centro e raggio lì.
             Vector3 localCenter = transform.InverseTransformPoint(center);
             float scale = Mathf.Max(Mathf.Abs(transform.lossyScale.x), 1e-4f);
-            float r2 = (radius / scale) * (radius / scale);
+            float r = radius / scale;
+            float r2 = r * r;
+
+            // Prima passata: quali punti cadono nella sfera. Con ensureProgress, se la sfera
+            // non contiene nessun punto ma il tratto è stato comunque "toccato" (il collider di
+            // presa è più largo del passo dei campioni), si toglie almeno il punto più vicino:
+            // la gomma che tocca deve sempre mordere qualcosa.
+            int n = rec.points.Count;
+            var remove = new bool[n];
+            bool removedAny = false;
+            int nearest = -1;
+            float nearestD2 = float.MaxValue;
+            for (int i = 0; i < n; i++)
+            {
+                float d2 = (rec.points[i] - localCenter).sqrMagnitude;
+                if (d2 <= r2) { remove[i] = true; removedAny = true; }
+                if (d2 < nearestD2) { nearestD2 = d2; nearest = i; }
+            }
+            if (!removedAny && ensureProgress && nearest >= 0)
+            {
+                float reach = r + 0.025f / scale; // tolleranza ≈ raggio del collider di presa
+                if (nearestD2 <= reach * reach)
+                {
+                    remove[nearest] = true;
+                    removedAny = true;
+                }
+            }
+            if (!removedAny)
+                return false;
 
             var runP = new List<Vector3>();
             var runR = new List<float>();
-            bool removedAny = false;
-            for (int i = 0; i < rawPoints.Count; i++)
+            for (int i = 0; i < n; i++)
             {
-                if ((rawPoints[i] - localCenter).sqrMagnitude <= r2)
-                {
-                    removedAny = true;
+                if (remove[i])
                     EmitPiece(runP, runR, pieces);
-                }
                 else
                 {
-                    runP.Add(rawPoints[i]);
-                    runR.Add(rawRadii[i]);
+                    runP.Add(rec.points[i]);
+                    runR.Add(rec.radii[i]);
                 }
             }
             EmitPiece(runP, runR, pieces);
-            return removedAny;
+            return true;
         }
 
         // Ricostruisce un pezzo dai punti rimasti e lo riallinea alla posa dell'originale.
@@ -304,13 +336,110 @@ namespace MixedRealityProject.Drawing
         {
             if (p.Count >= 2)
             {
-                var piece = Rebuild(p.ToArray(), r.ToArray(), record.color, record.brushType);
+                var piece = Rebuild(p.ToArray(), r.ToArray(), Record.color, Record.brushType);
                 piece.transform.SetPositionAndRotation(transform.position, transform.rotation);
-                piece.transform.localScale = transform.localScale;
+                // lossyScale, non localScale: i punti del pezzo sono nello spazio locale del
+                // tratto ma il pezzo nasce SENZA genitore — con la sola scala locale un tratto
+                // dentro un gruppo scalato (o figlio di una fusione) verrebbe ricostruito
+                // rimpicciolito/fuori posto.
+                piece.transform.localScale = transform.lossyScale;
                 pieces.Add(piece.gameObject);
             }
             p.Clear();
             r.Clear();
+        }
+
+        // Distrugge un Object sia a runtime sia in edit mode (i tool diagnostici da Editor
+        // esercitano questa logica senza Play, dove Destroy non è permesso).
+        static void Kill(Object o)
+        {
+            if (Application.isPlaying) Destroy(o); else DestroyImmediate(o);
+        }
+
+        // Figli "di contorno" del tratto (geometria propria, non sotto-oggetti fusi).
+        static bool IsDecoration(Transform t) => t.name == "Cap" || t.name == "GrabCollider";
+
+        /// <summary>C'è almeno un sotto-oggetto "vero" (tratto/fill fuso) sotto questo nodo?</summary>
+        public static bool HasRealChildren(Transform node)
+        {
+            foreach (Transform kid in node)
+                if (kid.gameObject.activeSelf && !IsDecoration(kid))
+                    return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Gomma parziale su un NODO di un gruppo fuso: erode la geometria propria del nodo
+        /// (TryEraseSphere) e ricostruisce il nodo come pezzi superstiti + CLONI fedeli
+        /// (Object.Instantiate, posa mondo conservata) dei suoi sotto-oggetti fusi. Il chiamante
+        /// nasconde il nodo originale e registra PushReplace([nodo], [risultato]) — un solo
+        /// passo di undo, gerarchia originale intatta per il ripristino.
+        /// erodible = false → il nodo non è un tratto erodibile (fill/punto/anelli): il
+        /// chiamante decide (tipicamente lo nasconde per intero). Ritorna null se non
+        /// sopravvive nulla.
+        /// </summary>
+        public static GameObject EraseNodeAndRebuild(Transform node, Vector3 center, float radius,
+            out bool erodible)
+        {
+            var stroke = node.GetComponent<Stroke>();
+            var pieces = new List<GameObject>();
+            erodible = stroke != null
+                && stroke.TryEraseSphere(center, radius, out pieces, ensureProgress: true);
+            if (!erodible)
+            {
+                foreach (var p in pieces)
+                    Kill(p);
+                return null;
+            }
+
+            // Cloni dei sotto-oggetti fusi (tratti/fill/anelli), con posa mondo conservata.
+            // I figli inattivi (pezzi già annullati, in mano alla history) non si clonano; i
+            // discendenti inattivi dei cloni si potano (sarebbero copie orfane invisibili).
+            var clones = new List<GameObject>();
+            foreach (Transform kid in node)
+            {
+                if (!kid.gameObject.activeSelf || IsDecoration(kid))
+                    continue;
+                var clone = Instantiate(kid.gameObject, kid.position, kid.rotation);
+                clone.name = kid.name;
+                clone.transform.localScale = kid.lossyScale;
+                foreach (var t in clone.GetComponentsInChildren<Transform>(true))
+                    if (t != null && t != clone.transform && !t.gameObject.activeSelf)
+                        Kill(t.gameObject);
+                clones.Add(clone);
+            }
+
+            // Radice del risultato: il primo pezzo (ha già DrawnItem da Rebuild), o il primo
+            // clone se il tratto del nodo è stato eroso per intero.
+            GameObject root = null;
+            if (pieces.Count > 0)
+            {
+                root = pieces[0];
+                for (int i = 1; i < pieces.Count; i++)
+                    Reparent(pieces[i], root);
+            }
+            foreach (var clone in clones)
+            {
+                if (root == null)
+                {
+                    root = clone;
+                    if (root.GetComponent<DrawnItem>() == null)
+                        root.AddComponent<DrawnItem>();
+                }
+                else
+                    Reparent(clone, root);
+            }
+            return root;
+        }
+
+        // Aggancia un superstite alla radice del risultato mantenendo la posa nel mondo;
+        // un solo DrawnItem per gruppo (quello della radice).
+        static void Reparent(GameObject go, GameObject root)
+        {
+            go.transform.SetParent(root.transform, true);
+            var item = go.GetComponent<DrawnItem>();
+            if (item != null)
+                Kill(item);
         }
 
         /// <summary>
