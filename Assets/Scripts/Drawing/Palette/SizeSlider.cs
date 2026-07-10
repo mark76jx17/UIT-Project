@@ -5,8 +5,10 @@ namespace MixedRealityProject.Drawing
     /// <summary>
     /// Slider orizzontale dello spessore (StrokeSettings.Size01). È un cuneo opaco —
     /// sottile a sinistra, spesso a destra — tinto col colore corrente in tempo reale:
-    /// si capisce a colpo d'occhio che regola lo spessore del tratto. Il pomello indica
-    /// il valore scelto. Tocco col pennello (visore) o trascinamento (simulatore).
+    /// si capisce a colpo d'occhio che regola lo spessore del tratto. In Cancella/Elimina
+    /// prende invece il grigio "gomma" (lo stesso del checker): lì regola la dimensione
+    /// della gomma, non un colore. Il pomello indica il valore scelto. Tocco col pennello
+    /// (visore) o trascinamento (simulatore).
     /// </summary>
     public class SizeSlider : MonoBehaviour, IPaletteControl
     {
@@ -58,7 +60,11 @@ namespace MixedRealityProject.Drawing
 
             knob.localPosition = new Vector3((StrokeSettings.Size01 - 0.5f) * width, 0f, -0.004f);
 
-            var c = StrokeSettings.BaseColor;
+            // In gomma (Cancella/Elimina) lo slider regola la dimensione della gomma, non un
+            // colore: mostra il grigio "gomma" del checker invece dell'ultimo colore scelto.
+            var c = StrokeSettings.EraserMode || StrokeSettings.DeleteMode
+                ? StrokeSettings.EraserSwatchColor
+                : StrokeSettings.BaseColor;
             c.a = 1f;
             material.SetColor(BaseColorId, c);
         }

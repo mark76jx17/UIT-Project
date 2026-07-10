@@ -351,11 +351,16 @@ namespace MixedRealityProject.Drawing
         {
             if (hovered == target)
                 return;
-            // Non spegnere l'evidenziazione di un oggetto tenuto dall'altra mano.
-            if (hovered != null && !GrabSession.IsHeld(hovered))
+            // Non toccare l'evidenziazione di un oggetto tenuto dall'altra mano né di
+            // quello tinto di rosso da Elimina: il raggio dell'hover di presa è più
+            // stretto dell'isteresi del rosso, e il Clear all'uscita lo spegnerebbe
+            // (il rosso viene applicato solo all'aggancio, non riapparirebbe).
+            if (hovered != null && !GrabSession.IsHeld(hovered)
+                && hovered != BrushController.ActiveEraseHover)
                 StrokeHighlight.Clear(hovered);
             hovered = target;
-            if (hovered != null && !GrabSession.IsHeld(hovered))
+            if (hovered != null && !GrabSession.IsHeld(hovered)
+                && hovered != BrushController.ActiveEraseHover)
                 StrokeHighlight.Set(hovered, 1.2f);
         }
     }

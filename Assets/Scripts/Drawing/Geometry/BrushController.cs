@@ -162,7 +162,18 @@ namespace MixedRealityProject.Drawing
         Transform headCached;
 
         // Anteprima gomma (oggetto sotto la punta) e hint del magnete (punto di aggancio).
-        Transform eraseHover;
+        // Bersaglio del rosso di Elimina. La property tiene sincronizzato ActiveEraseHover,
+        // letto dal GrabController: il suo hover di presa NON deve toccare questo oggetto
+        // (Set/Clear condividono lo stesso MaterialPropertyBlock e spegnerebbero il rosso).
+        Transform eraseHoverField;
+        Transform eraseHover
+        {
+            get => eraseHoverField;
+            set { eraseHoverField = value; ActiveEraseHover = value; }
+        }
+
+        /// <summary>L'oggetto attualmente tinto di rosso da Elimina (null se nessuno).</summary>
+        public static Transform ActiveEraseHover { get; private set; }
         Transform snapHint;
 
         void Awake()

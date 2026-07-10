@@ -16,7 +16,7 @@ namespace MixedRealityProject.Drawing
 
         // In Cancella/Elimina il colore non c'entra: l'anteprima diventa un grigio
         // trasparente con l'icona dello strumento (gomma o ✕, le stesse dei bottoni).
-        static readonly Color EraseGray = new(0.62f, 0.62f, 0.68f, 0.40f);
+        // Il grigio è condiviso con lo slider Size (fonte unica in StrokeSettings).
 
         Transform swatch;
         Material swatchMat;
@@ -45,6 +45,11 @@ namespace MixedRealityProject.Drawing
             sw.transform.localPosition = new Vector3(0f, 0f, -0.005f);
             sw.AddComponent<MeshFilter>().mesh = RoundedMesh.Rect(1f, 1f, 0.25f);
             swatchMat = BrushMaterials.CreateUnlit(Color.white);
+            // Lo swatch è trasparente (per l'anteprima dell'opacità e il grigio-gomma 0.40):
+            // senza questo scriverebbe il proprio alpha nel framebuffer e "bucherebbe"
+            // l'occlusione del passthrough (see-through), anche se la bordatura opaca dietro
+            // lo copre. PreserveDestAlpha lascia intatto l'alpha=1 del bordo sotto.
+            BrushMaterials.PreserveDestAlpha(swatchMat);
             sw.AddComponent<MeshRenderer>().material = swatchMat;
             swatch = sw.transform;
 
@@ -79,7 +84,7 @@ namespace MixedRealityProject.Drawing
             if (erasing)
             {
                 // Grigio trasparente + icona dello strumento: "qui non si sceglie un colore".
-                swatchMat.SetColor(BaseColorId, EraseGray);
+                swatchMat.SetColor(BaseColorId, StrokeSettings.EraserSwatchColor);
                 float sz = maxSize * 0.85f;
                 border.localScale = new Vector3(sz + borderPadding, sz + borderPadding, 1f);
                 swatch.localScale = new Vector3(sz, sz, 1f);

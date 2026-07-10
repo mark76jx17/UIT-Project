@@ -1,8 +1,16 @@
 # Menu Options: posizione, modale, aspetto e handedness dinamico (giugno 2026)
 
-> Rifinitura del sotto-pannello **Options** (aperto dal bottone "tre puntini" nella
+> Rifinitura del sotto-pannello **Options** (aperto dal bottone Options nella
 > striscia azioni). Prima compariva **centrato sul** pannello principale, lasciava
 > interagibili i controlli sotto e mostrava sempre l'etichetta fissa "Left-Handed".
+
+> **Aggiornamento icona (2026-07-10).** Il bottone Options non usa più i "tre puntini"
+> (`Ellipsis`) ma un **ingranaggio** classico (`ToolIcon.Gear`, glifo `"options"`): corona
+> a 8 denti con foro centrale, disegnata come **un'unica SDF** (le primitive del generatore
+> fanno solo unione, non sottrazione, quindi il foro non si può ritagliare con più stamp —
+> lo si ottiene intersecando l'esterno del foro con l'interno del profilo dentato via `max`).
+> Stesso stile bianco-su-trasparente degli altri glifi. Riferimenti a "tre puntini" nel
+> resto del documento vanno letti come "bottone Options".
 
 ## Cosa cambia
 

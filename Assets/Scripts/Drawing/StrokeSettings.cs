@@ -48,6 +48,11 @@ namespace MixedRealityProject.Drawing
 
         public static bool DeleteMode => Tool == ToolMode.Delete;
 
+        /// <summary>Grigio "gomma" (semi-trasparente): unica fonte usata sia dall'anteprima
+        /// colore (checker) sia dallo slider Size in modalità Cancella/Elimina, così il
+        /// linguaggio visivo è coerente.</summary>
+        public static readonly Color EraserSwatchColor = new(0.62f, 0.62f, 0.68f, 0.40f);
+
         /// <summary>Tipo di pennello corrente (vedi la riga pennelli della palette).</summary>
         public static BrushType Type = BrushType.Round;
 

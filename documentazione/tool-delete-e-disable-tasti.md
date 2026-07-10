@@ -32,8 +32,10 @@ evidenzia in rosso l'oggetto puntato prima di cancellare (`UpdateEraseHover`).
 Nel simulatore desktop lo strumento si cicla; da controller la scorciatoia X cicla tutti e 4
 (`ControllerShortcuts`: `Tool = (ToolMode)(((int)Tool + 1) % 4)`), con toast del nome. Nota:
 esiste anche il **"Delete all"** (svuota tutto) sotto pressione prolungata di B/Y (~1.5 s,
-`DeleteHoldSeconds`, solo se non stai afferrando) — è un'altra cosa dal tool Delete (vedi
-`undo-clear-totale.md` per il comportamento annullabile dello svuota-tutto).
+`DeleteHoldSeconds`, solo se non stai afferrando) — è un'altra cosa dal tool Delete. Da
+2026-07-10 l'hold non svuota subito ma apre la **conferma Sì/No** della palette
+(`PaletteController.OpenConfirmClear`); vedi `undo-clear-totale.md` per conferma +
+annullabilità dello svuota-tutto.
 
 ## 2. Disabilitazione controlli per strumento (`SyncToolControlAvailability`)
 
@@ -42,16 +44,24 @@ attivo, così non si tocca per sbaglio un controllo che non ha effetto:
 
 | Gruppo | Abilitato per | Contenuto |
 |---|---|---|
-| `colorControls` | **Pen, Fill** | ruota colori, luminosità, recenti, alpha |
 | `sizeControls` | **Pen, Eraser** | slider spessore (il raggio vale anche per la gomma) |
+| `alphaControls` | **Pen, Fill** | slider Opacity + label (l'opacità serve solo col colore) |
 | `penOnlyControls` | **solo Pen** | Pressure, Mirror/Grid/Line (draw-only), guide |
 | `brushOnlyControls` | **solo Pen** | striscia dei 4 tipi di pennello |
 
+> **Zona colore sempre attiva.** Ruota/luminosità/recenti NON sono più in un gruppo
+> disabilitabile: restano attivi in ogni strumento, perché toccarli in Gomma/Elimina
+> riattiva il pennello (`StrokeSettings.ReactivatePen`). Lo **slider Opacity** invece è
+> stato staccato in `alphaControls` (2026-07-10): in Gomma/Elimina non ha effetto utile e
+> toccarlo non riattiva il pennello (imposta solo `Alpha`), quindi si sbiadisce e non è
+> toccabile.
+
 Meccanismo (`SetControlGroupEnabled`): abilita/disabilita **i collider** di tutto il
-sotto-albero del controllo (così ray e poke non lo raggiungono) e attiva un **overlay
-scuro semitrasparente** (`*Dim`: `colorDim`/`sizeDim`/`pressureDim`/`guidesDim`/`brushDim`,
-creati da `MakeDisabledOverlay`) che comunica visivamente lo stato "spento". Lo switch scatta
-**solo al cambio** di stato (campi `lastColorEnabled`/… ), non ogni frame.
+sotto-albero del controllo (così ray e poke non lo raggiungono) e **smorza direttamente
+l'aspetto** dei controlli (materiali via `MaterialPropertyBlock` × `DimFactor`, testi TMP
+via `alpha`) — non più un overlay scuro sovrapposto (vedi `anteprima-colore-e-dim-diretto.md`).
+Lo switch scatta **solo al cambio** di stato (campi `lastSizeEnabled`/`lastAlphaEnabled`/…),
+non ogni frame.
 
 I controlli si registrano al gruppo alla costruzione (`RegisterPenOnlyControl`, ecc.); i
 toggle Mirror/Grid/Line passano da `MakeIconToggleButton` che li marca automaticamente
@@ -82,6 +92,23 @@ bersaglio fosse rilevato. Fix in `BrushController`:
 - **Coerenza rosso→azione**: `DeleteAt` elimina **esattamente ciò che è evidenziato**
   (`eraseHover`), anche se l'isteresi lo tiene agganciato poco oltre il raggio d'ingresso:
   quello che è rosso è quello che sparisce.
+
+### Fix (2026-07-10) — il rosso "flashava" e spariva subito
+
+Al test in visore il rosso appariva e svaniva quasi subito nonostante l'isteresi. Causa:
+**conflitto tra due evidenziazioni sullo stesso oggetto**. Il rosso viene applicato **una
+volta sola** all'aggancio (poi `UpdateEraseHover` esce finché il bersaglio non cambia); ma
+sulla stessa mano gira anche l'**hover di presa** del `GrabController` (schiaritura 1.2×),
+che scrive sullo **stesso `MaterialPropertyBlock`**: entrando lo sovrascriveva e — peggio —
+uscendo dal suo raggio (più stretto dei 6 cm dell'isteresi) faceva `Clear()`, spegnendo il
+rosso senza che il `BrushController` se ne accorgesse (bersaglio ancora agganciato → nessuna
+riapplicazione).
+
+Fix: il rosso ha **priorità**. `BrushController` espone `ActiveEraseHover` (statico,
+sincronizzato da una property su `eraseHover`) e `GrabController.SetHover` **non tocca**
+(né `Set` né `Clear`) l'oggetto attualmente rosso. Limite noto (raro): afferrando col grip
+l'oggetto rosso, o candidandolo al magnete viola mentre si tiene altro, quelle tinte
+prevalgono — sono azioni esplicite dell'utente.
 
 ## Verifica
 

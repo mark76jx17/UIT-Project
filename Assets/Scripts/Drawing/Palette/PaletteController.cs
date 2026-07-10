@@ -102,11 +102,16 @@ namespace MixedRealityProject.Drawing
         readonly List<GameObject> sizeControls = new();
         readonly List<GameObject> penOnlyControls = new();
         readonly List<GameObject> brushOnlyControls = new();
+        // L'opacità serve solo dove c'è un colore (Penna/Fill): in Gomma/Elimina è inutile,
+        // quindi lo slider Opacity si sbiadisce e non è toccabile (a differenza della ruota,
+        // che resta attiva per riattivare il pennello — toccare l'alpha non lo farebbe).
+        readonly List<GameObject> alphaControls = new();
 
 
         bool lastSizeEnabled = true;
         bool lastPenOnlyEnabled = true;
         bool lastBrushEnabled = true;
+        bool lastAlphaEnabled = true;
 
         // Sotto-pannello "Options" (impostazioni). Vive a parte rispetto a `panel` così un
         // Rebuild del pannello principale (es. al toggle mancino) non distrugge il controllo
@@ -649,9 +654,10 @@ namespace MixedRealityProject.Drawing
             var alphaRow = layout.Row(0.024f);
             var alphaLabel = alphaRow.Left(0.055f);
             var alphaCell = alphaRow.Fill();
-            MakeLabel(panel.transform, Localization.Get("opacity"),
+            var alphaText = MakeLabel(panel.transform, Localization.Get("opacity"),
                 new Vector3(alphaLabel.Center.x, alphaLabel.Center.y, -0.006f),
                 alphaLabel.Size, SliderLabelFont, TextAlignmentOptions.Left, autoFit: true);
+            RegisterAlphaControl(alphaText.gameObject); // si sbiadisce con lo slider Opacity
             var alpha = new GameObject("AlphaSlider");
             alpha.transform.SetParent(panel.transform, false);
 
@@ -660,6 +666,7 @@ namespace MixedRealityProject.Drawing
             alpha.transform.localPosition = alphaSliderPos;
 
             alpha.AddComponent<AlphaSlider>().Build(new Vector2(alphaCell.Size.x, 0.016f));
+            RegisterAlphaControl(alpha); // Opacity: inattivo in Gomma/Elimina
             // separator
             layout.Gap(0.008f);
             MakeRounded(panel.transform, "Sep1",
@@ -773,11 +780,13 @@ namespace MixedRealityProject.Drawing
             sizeControls.Clear();
             penOnlyControls.Clear();
             brushOnlyControls.Clear();
+            alphaControls.Clear();
 
 
             lastSizeEnabled = true;
             lastPenOnlyEnabled = true;
             lastBrushEnabled = true;
+            lastAlphaEnabled = true;
             lastTool = (ToolMode)(-1);
             lastType = -1;
             BuildPanel();
@@ -801,11 +810,13 @@ namespace MixedRealityProject.Drawing
             sizeControls.Clear();
             penOnlyControls.Clear();
             brushOnlyControls.Clear();
+            alphaControls.Clear();
 
 
             lastSizeEnabled = true;
             lastPenOnlyEnabled = true;
             lastBrushEnabled = true;
+            lastAlphaEnabled = true;
             lastTool = (ToolMode)(-1);
             lastType = -1;
             BuildPanel();
@@ -1365,6 +1376,12 @@ namespace MixedRealityProject.Drawing
                 sizeControls.Add(go);
         }
 
+        void RegisterAlphaControl(GameObject go)
+        {
+            if (go != null && !alphaControls.Contains(go))
+                alphaControls.Add(go);
+        }
+
         void RegisterPenOnlyControl(GameObject go)
         {
             if (go != null && !penOnlyControls.Contains(go))
@@ -1426,11 +1443,20 @@ namespace MixedRealityProject.Drawing
 
             bool penOnlyEnabled = StrokeSettings.Tool == ToolMode.Pen;
             bool brushEnabled = StrokeSettings.Tool == ToolMode.Pen;
+            // Opacità: solo dove serve un colore (Penna/Fill). Inutile in Gomma/Elimina.
+            bool alphaEnabled = StrokeSettings.Tool == ToolMode.Pen
+                             || StrokeSettings.Tool == ToolMode.Fill;
 
             if (sizeEnabled != lastSizeEnabled)
             {
                 lastSizeEnabled = sizeEnabled;
                 SetControlGroupEnabled(sizeControls, sizeEnabled);
+            }
+
+            if (alphaEnabled != lastAlphaEnabled)
+            {
+                lastAlphaEnabled = alphaEnabled;
+                SetControlGroupEnabled(alphaControls, alphaEnabled);
             }
 
             if (penOnlyEnabled != lastPenOnlyEnabled)

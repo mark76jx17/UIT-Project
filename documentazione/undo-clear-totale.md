@@ -83,3 +83,12 @@ più consistente e prevedibile (il Clear è un'azione come le altre, non una bar
 - Compilazione: **0 errori** (MCP refresh + console).
 - Test in Play/visore a carico dell'utente: disegna → Clear (scena vuota) → Undo (torna
   tutto) → Redo (ri-svuota). Verificare anche più Clear consecutivi e Undo oltre il Clear.
+
+## Aggiornamento (2026-07-10) — conferma Sì/No prima dello svuotamento
+
+Con il commit `1f3f2eb` (collaboratore) sia il bottone **clear** della palette sia l'hold
+B/Y da controller non chiamano più `NewScene()` direttamente: aprono un **pannello modale
+di conferma Sì/No** (`PaletteController.OpenConfirmClear` / `BuildConfirmClearPanel`,
+stringhe `confirm.*` in `Localization`). Il **Sì** chiama `DrawingStore.NewScene()`, quindi
+lo svuotamento resta **annullabile con Undo** come descritto sopra: le due protezioni si
+sommano (conferma prima, Undo dopo).

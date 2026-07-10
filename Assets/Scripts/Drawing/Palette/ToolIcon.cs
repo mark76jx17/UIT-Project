@@ -34,7 +34,7 @@ namespace MixedRealityProject.Drawing
                 case "save": SaveLoad(down: true); break;
                 case "load": SaveLoad(down: false); break;
                 case "clear": Trash(); break;
-                case "options": Ellipsis(); break;
+                case "options": Gear(); break;
                 case "close": Cross(); break;
                 case "chevron": Chevron(); break;
                 case "bolt": Bolt(); break;
@@ -185,12 +185,28 @@ namespace MixedRealityProject.Drawing
             Tri(tip + tangent * 0.26f, baseC + n * 0.20f, baseC - n * 0.20f);
         }
 
-        // Tre puntini orizzontali (menu "Options"): coerente con gli altri glifi SDF.
-        static void Ellipsis()
+        // Ingranaggio (menu "Options"): corona dentata classica con foro centrale, disegnata
+        // come UN'unica SDF (le primitive fanno solo unione, non sottrazione, quindi il foro
+        // non si può "ritagliare" con più stamp). Raggio esterno modulato per angolo = denti;
+        // intersezione con l'esterno del foro (max) = anello. teeth denti a duty ~50%.
+        static void Gear()
         {
-            Disc(new(-0.34f, 0f), 0.13f);
-            Disc(new(0f, 0f), 0.13f);
-            Disc(new(0.34f, 0f), 0.13f);
+            const int teeth = 8;
+            const float rBase = 0.46f; // base dei denti (corpo)
+            const float rTip = 0.68f;  // punta dei denti
+            const float rHole = 0.22f; // foro centrale
+            const float toothH = rTip - rBase;
+            Stamp(p =>
+            {
+                float r = p.magnitude;
+                float ang = Mathf.Atan2(p.y, p.x);
+                // profilo dente: ~1 sulla punta, ~0 nella valle, fianchi morbidi (trapezio)
+                float t = Mathf.InverseLerp(-0.35f, 0.35f, Mathf.Cos(ang * teeth));
+                float profile = t * t * (3f - 2f * t); // smoothstep
+                float outer = rBase + toothH * profile;
+                // anello: dentro se rHole < r < outer → intersezione (max delle due pareti)
+                return Mathf.Max(r - outer, rHole - r);
+            });
         }
 
         // X di chiusura: due segmenti diagonali con estremità arrotondate (SDF), molto più

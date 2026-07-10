@@ -5,9 +5,10 @@ namespace MixedRealityProject.Drawing
     /// <summary>
     /// Slider orizzontale della trasparenza (StrokeSettings.Alpha). Una rampa del colore
     /// corrente sfuma da trasparente (sinistra) a pieno (destra). Dietro c'è una scacchiera
-    /// OPACA: così la parte trasparente si legge come scacchiera e non come "buco" sul
-    /// passthrough (niente più see-through). Il pomello indica l'alpha scelto; si usa
-    /// toccandolo con la punta del pennello (visore) o trascinando (simulatore).
+    /// OPACA, così la parte trasparente si legge come scacchiera; la rampa davanti usa
+    /// PreserveDestAlpha per non scrivere il proprio alpha nel framebuffer (altrimenti
+    /// "bucherebbe" il passthrough Quest dove è quasi trasparente). Il pomello indica l'alpha
+    /// scelto; si usa toccandolo con la punta del pennello (visore) o trascinando (simulatore).
     /// </summary>
     public class AlphaSlider : MonoBehaviour, IPaletteControl
     {
@@ -43,6 +44,10 @@ namespace MixedRealityProject.Drawing
             gameObject.AddComponent<MeshFilter>().mesh = RoundedMesh.TexturedQuad(size.x, size.y);
             material = BrushMaterials.CreateUnlit(Color.white); // trasparente, alpha dalla rampa
             material.SetTexture("_BaseMap", Ramp());
+            // La rampa è trasparente: senza questo scriverebbe il proprio alpha nel framebuffer
+            // e "bucherebbe" l'occlusione del passthrough dove è quasi trasparente (a sinistra),
+            // nonostante la scacchiera opaca dietro. PreserveDestAlpha lascia intatto quell'alpha=1.
+            BrushMaterials.PreserveDestAlpha(material);
             gameObject.AddComponent<MeshRenderer>().material = material;
 
             var collider = gameObject.AddComponent<BoxCollider>();
