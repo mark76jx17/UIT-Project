@@ -51,6 +51,40 @@ fondo). Impulso aptico leggero entrando nel raggio di presa e su grab/rilascio/r
 > Verificato a render in editor (tool di debug temporaneo, poi rimosso) in 3 posizioni — angolo,
 > lato, transizione — prima del test in visore.
 
+## Aggiornamento (2026-07-10) — comparsa vicino al bordo, estetica e movimento fluido
+
+Tre rifiniture dopo il test in visore, per rendere l'interazione più comprensibile e curata:
+
+1. **Compare più vicino e SOLO vicino al bordo.** `HighlightRange` passa da 0.22 a **0.15 m** e,
+   soprattutto, la distanza che governa indicatore/presa non è più quella dai *bounds di tutto il
+   pannello* (che era 0 stando sopra qualsiasi punto), ma la **distanza dalla linea del bordo**
+   (`DistanceToPanelEdge`): SDF con segno del rettangolo arrotondato nello spazio locale (|dist dal
+   contorno|) combinato con lo scostamento dal piano, riportato in metri-mondo con la scala del
+   pannello. Al **centro** del pannello è grande → niente presa lì; vicino al **bordo** è piccola →
+   compare e si aggancia. La vecchia `DistanceToPanel` (bounds) resta, ma **solo** per
+   `SuppressBrushGrab` (non regredire la soppressione della presa-tratti quando la punta è sopra un
+   bottone centrale). Gate: nessuna affordance a palette **chiusa** (`!isOpen || visibility < 0.5`),
+   altrimenti col pannello scalato ~0 la distanza-dal-bordo collasserebbe a zero (agganciabile ovunque).
+
+2. **Estetica del ribbon.** Più **sottile** (`HlThick` 0.012 → **0.008**) ed **estremità
+   arrotondate**: in `GrabRibbon.Rebuild` lo spessore ai due capi segue un **profilo circolare**
+   (semicerchio, `EndRound = 0.12`) — resta pieno quasi fino al capo e curva solo in punta, così i
+   capi sono **tondi e pieni**, non appuntiti (una prima versione smoothstep rastremava troppo presto
+   → capi quasi a punta) né tagliati netti.
+
+3. **Movimento fluido (lo "scatto" sparisce).** Due cause in `GrabRibbon`:
+   - il centro finestra si agganciava al **campione discreto** più vicino del perimetro (~48
+     campioni) → `s0` saltava a gradini. Ora `NearestArc` fa la **proiezione continua** sul segmento
+     di contorno più vicino (interpola tra i campioni);
+   - nessuno smorzamento temporale → aggiunto uno **smoothing esponenziale** del centro finestra
+     (`RebuildAt(..., smoothing)`, costante `RibbonSmooth = 0.05 s`), con gestione del **wrap** sul
+     loop (avvicinamento lungo la via più breve). `HideHighlight` chiama `ResetSmoothing` così alla
+     ricomparsa la striscia si posiziona subito, senza scivolare da dov'era.
+
+   Nota: `NearestArc` continuo e capi arrotondati vivono in `GrabRibbon` (condiviso col foglio a
+   quadretti → ne beneficia anche lui); lo smoothing è opzionale (default 0 = immediato, il foglio
+   resta com'era).
+
 ## Interazione quando è fissata (poke + ray, entrambi i controller)
 
 Da fissata nella stanza la palette si comanda anche col **secondo controller** (quello che la
@@ -123,8 +157,9 @@ agganciata/pinned). In edit mode niente `Update`/grab (nessuno script è `Execut
   `PalettePokeTip` (sfera trigger + Rigidbody cinematico + `PalettePoke`).
 
 ## Parametri tarabili
-`HighlightRange` (0.22), `GrabRange` (0.09), `GripPress`/`GripRelease` (0.55/0.35); striscia:
-`HlThick`/`HlWindow`/`HlWindowSegs`/`PanelCorner` + alpha in `UpdateHighlight`; durate `PulseBrush`.
+`HighlightRange` (0.15), `GrabRange` (0.09), `GripPress`/`GripRelease` (0.55/0.35); striscia:
+`HlThick` (0.008)/`HlWindow`/`HlWindowSegs`/`PanelCorner`/`RibbonSmooth` (0.05) + `EndRound` (0.12)
+in `GrabRibbon` + alpha in `UpdateHighlight`; durate `PulseBrush`.
 
 ## Verifica
 Compilazione 0 errori; preview statici invariati (highlight inattivo a riposo → nessuna regressione

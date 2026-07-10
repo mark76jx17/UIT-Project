@@ -23,6 +23,14 @@ namespace MixedRealityProject.Drawing
         Vector3[] verts;
         Vector2[] uv;
 
+        float smoothedArc;          // arc-length del centro finestra, smorzato tra i frame
+        bool hasSmoothed;           // false finché non c'è un valore da cui smorzare
+
+        // Frazione della finestra su cui arrotondare ciascun capo della striscia. Profilo
+        // circolare (semicerchio): resta a spessore pieno quasi fino al capo e arrotonda solo
+        // in punta → capi tondi e "pieni", non appuntiti.
+        const float EndRound = 0.12f;
+
         public GrabRibbon(Vector2 panelSize, float cornerRadius, float thickness, float windowLength, int windowSegs)
         {
             thick = thickness;
@@ -34,17 +42,61 @@ namespace MixedRealityProject.Drawing
         /// <summary>
         /// Ricostruisce la striscia nel mesh dato, centrata sul punto del contorno più vicino
         /// a localPoint (spazio locale del pannello, pre-scala, piano XY).
+        /// <paramref name="smoothing"/> &gt; 0 = costante di tempo (s) dello smorzamento
+        /// temporale del centro finestra: elimina lo "scatto" quando il controller scorre lungo
+        /// il bordo (0 = aggancio immediato, comportamento storico).
         /// </summary>
-        public void RebuildAt(Vector2 localPoint, Mesh mesh)
+        public void RebuildAt(Vector2 localPoint, Mesh mesh, float smoothing = 0f)
         {
-            int nearest = 0;
-            float best = float.MaxValue;
-            for (int i = 0; i < periPos.Length; i++)
+            // Bersaglio CONTINUO: proiezione sul segmento di contorno più vicino (non sul
+            // campione discreto più vicino, che faceva saltare il centro finestra a gradini).
+            float target = NearestArc(localPoint);
+
+            float s0;
+            if (smoothing <= 0f || !hasSmoothed)
             {
-                float d = (periPos[i] - localPoint).sqrMagnitude;
-                if (d < best) { best = d; nearest = i; }
+                s0 = target;
             }
-            Rebuild(periArc[nearest], mesh);
+            else
+            {
+                // Avvicina il centro smorzato al bersaglio lungo la via più breve sul loop.
+                float delta = Mathf.Repeat(target - smoothedArc, periLen);
+                if (delta > periLen * 0.5f)
+                    delta -= periLen;
+                float k = 1f - Mathf.Exp(-Time.deltaTime / smoothing); // smorzamento esponenziale
+                s0 = Mathf.Repeat(smoothedArc + delta * k, periLen);
+            }
+            smoothedArc = s0;
+            hasSmoothed = true;
+            Rebuild(s0, mesh);
+        }
+
+        /// <summary>Azzera lo stato di smorzamento: alla prossima comparsa la striscia si
+        /// posiziona subito sul punto giusto invece di scivolarci da dov'era.</summary>
+        public void ResetSmoothing() => hasSmoothed = false;
+
+        // Arc-length del punto del contorno più vicino a pt, con proiezione continua su ogni
+        // segmento del perimetro (interpola tra i campioni → nessuna quantizzazione).
+        float NearestArc(Vector2 pt)
+        {
+            int n = periPos.Length;
+            float bestD = float.MaxValue, bestArc = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                int j = (i + 1) % n;
+                Vector2 a = periPos[i], ab = periPos[j] - a;
+                float len2 = ab.sqrMagnitude;
+                float t = len2 > 1e-9f ? Mathf.Clamp01(Vector2.Dot(pt - a, ab) / len2) : 0f;
+                float d = (pt - (a + ab * t)).sqrMagnitude;
+                if (d < bestD)
+                {
+                    bestD = d;
+                    float a0 = periArc[i];
+                    float a1 = (i + 1 < n) ? periArc[i + 1] : periLen;
+                    bestArc = Mathf.Lerp(a0, a1, t);
+                }
+            }
+            return bestArc;
         }
 
         // Ricostruisce la striscia per la finestra [s0-window/2, s0+window/2] lungo il contorno.
@@ -74,8 +126,12 @@ namespace MixedRealityProject.Drawing
                 float frac = i / (float)segs;               // 0..1 lungo la finestra
                 float s = s0 + (frac - 0.5f) * window;
                 SampleContour(s, out var p, out var n);
-                verts[i * 2] = new Vector3(p.x - n.x * half, p.y - n.y * half, 0f); // interno
-                verts[i * 2 + 1] = new Vector3(p.x + n.x * half, p.y + n.y * half, 0f); // esterno
+                // Arrotonda i due capi con un profilo CIRCOLARE (semicerchio): pieno al centro,
+                // resta pieno quasi fino al capo e curva solo in punta → capi tondi, non a punta.
+                float d = Mathf.Clamp01(Mathf.Min(frac, 1f - frac) / EndRound);
+                float h = half * Mathf.Sqrt(Mathf.Max(0f, 1f - (1f - d) * (1f - d)));
+                verts[i * 2] = new Vector3(p.x - n.x * h, p.y - n.y * h, 0f); // interno
+                verts[i * 2 + 1] = new Vector3(p.x + n.x * h, p.y + n.y * h, 0f); // esterno
                 uv[i * 2] = new Vector2(frac, 0f);
                 uv[i * 2 + 1] = new Vector2(frac, 1f);
             }

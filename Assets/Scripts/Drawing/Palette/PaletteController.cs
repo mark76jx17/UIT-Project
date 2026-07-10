@@ -181,13 +181,14 @@ namespace MixedRealityProject.Drawing
         Vector3 grabLocalPos;       // posa della palette nello spazio del controller all'aggancio
         Quaternion grabLocalRot;
         float brushHapticTimer;     // impulso aptico sulla mano-pennello (grab/rilascio)
-        const float HighlightRange = 0.22f; // entro questa distanza l'indicatore inizia a comparire
-        const float GrabRange = 0.09f;      // entro questa: agganciabile col grip
+        const float HighlightRange = 0.15f; // entro questa distanza DAL BORDO l'indicatore compare
+        const float GrabRange = 0.09f;      // entro questa (dal bordo): agganciabile col grip
         const float GripPress = 0.55f, GripRelease = 0.35f;
-        const float HlThick = 0.012f;       // spessore della striscia (dentro il bordo: no overlap)
+        const float HlThick = 0.008f;       // spessore della striscia (dentro il bordo: no overlap)
         const float HlWindow = 0.16f;       // lunghezza dell'arco visibile attorno al punto più vicino
         const int HlWindowSegs = 28;        // risoluzione della finestra
         const float PanelCorner = 0.030f;   // raggio angolo del pannello (MainPanel)
+        const float RibbonSmooth = 0.05f;   // costante di tempo (s) dello smorzamento del ribbon
 
         // True quando la palette è fissata nella stanza (Placed): abilita il ray della mano-palette.
         public static bool Placed;
@@ -389,9 +390,23 @@ namespace MixedRealityProject.Drawing
             }
 
             var brushPos = Brush.transform.position;
-            float dist = DistanceToPanel(brushPos);
-            bool inGrabRange = dist <= GrabRange;
             bool grabbing = placeMode == PlaceMode.Grabbing;
+
+            // Presa possibile solo con la palette aperta e visibile (o già in presa): da chiusa
+            // il pannello è scalato ~0 e la distanza-dal-bordo collasserebbe a zero (agganciabile
+            // ovunque). Da chiusa non c'è affordance né soppressione.
+            if (!grabbing && (!isOpen || visibility < 0.5f))
+            {
+                brushNearPalette = false;
+                SuppressBrushGrab = false;
+                HideHighlight();
+                return;
+            }
+
+            // Presa/indicatore basati sulla distanza DAL BORDO (contorno), non da tutto il
+            // pannello: la palette si solleva avvicinandosi a un'area vicina al bordo, non al centro.
+            float edgeDist = DistanceToPanelEdge(brushPos);
+            bool inGrabRange = edgeDist <= GrabRange;
 
             // Impulso leggero quando ENTRI nel raggio di presa (affordance "agganciabile").
             if (inGrabRange && !brushNearPalette && !grabbing)
@@ -400,11 +415,13 @@ namespace MixedRealityProject.Drawing
 
             // Indicatore: invisibile lontano (a HighlightRange), cresce avvicinandosi, pieno a
             // contatto/dentro (a GrabRange) e mentre si afferra.
-            float t = grabbing ? 1f : Mathf.InverseLerp(HighlightRange, GrabRange, dist);
+            float t = grabbing ? 1f : Mathf.InverseLerp(HighlightRange, GrabRange, edgeDist);
             UpdateHighlight(brushPos, t, inGrabRange || grabbing);
 
-            // Vicino o mentre trascini: il GrabController della mano-pennello salta la presa tratti.
-            SuppressBrushGrab = inGrabRange || grabbing;
+            // Soppressione della presa-tratti: resta legata alla vicinanza dell'INTERO pannello
+            // (bounds), non solo al bordo — così la punta sopra un bottone al centro non fa
+            // partire per sbaglio la presa dei tratti dietro la palette.
+            SuppressBrushGrab = DistanceToPanel(brushPos) <= GrabRange || grabbing;
 
             float grip = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger, StrokeSettings.BrushHand);
             if (grabbing)
@@ -452,11 +469,35 @@ namespace MixedRealityProject.Drawing
 
         // Distanza dal controller-pennello al pannello (punto più vicino sui bounds del fondo).
         // ClosestPoint restituisce il punto stesso se è dentro i bounds → distanza 0.
+        // Usata SOLO per la soppressione della presa-tratti (tutto il pannello).
         float DistanceToPanel(Vector3 p)
         {
             if (panelBgRenderer == null)
                 return float.MaxValue;
             return Vector3.Distance(p, panelBgRenderer.bounds.ClosestPoint(p));
+        }
+
+        // Distanza dal controller alla LINEA DEL BORDO del pannello (contorno arrotondato),
+        // non a tutta la sua superficie: al centro del pannello è grande (niente presa lì),
+        // vicino al bordo è piccola. Calcolata nello spazio locale del pannello: distanza 2D
+        // dal contorno (|SDF rettangolo arrotondato|) combinata con lo scostamento dal piano;
+        // riportata in metri-mondo con la scala del pannello.
+        float DistanceToPanelEdge(Vector3 worldPoint)
+        {
+            if (panel == null)
+                return float.MaxValue;
+            Vector3 lp = panel.transform.InverseTransformPoint(worldPoint); // locale, pre-scala
+            float hx = panelRectSize.x * 0.5f, hy = panelRectSize.y * 0.5f;
+            // SDF con segno del rettangolo arrotondato (negativo dentro): la distanza dalla
+            // linea del bordo è il suo valore assoluto.
+            float qx = Mathf.Abs(lp.x) - (hx - PanelCorner);
+            float qy = Mathf.Abs(lp.y) - (hy - PanelCorner);
+            float outside = new Vector2(Mathf.Max(qx, 0f), Mathf.Max(qy, 0f)).magnitude;
+            float inside = Mathf.Min(Mathf.Max(qx, qy), 0f);
+            float edge2D = Mathf.Abs(outside + inside - PanelCorner);
+            float depth = Mathf.Abs(lp.z); // scostamento dal piano del pannello
+            float local = Mathf.Sqrt(edge2D * edge2D + depth * depth);
+            return local * panel.transform.lossyScale.x; // locale → metri mondo
         }
 
         // Striscia glow che scorre lungo il CONTORNO arrotondato del pannello, centrata su una
@@ -483,13 +524,15 @@ namespace MixedRealityProject.Drawing
             // Punto più vicino in spazio locale del pannello (pre-scala: InverseTransformPoint
             // annulla la scala d'animazione).
             Vector3 lp = panel.transform.InverseTransformPoint(brushPos);
-            hlGeom.RebuildAt(new Vector2(lp.x, lp.y), hlMesh);
+            hlGeom.RebuildAt(new Vector2(lp.x, lp.y), hlMesh, RibbonSmooth);
         }
 
         void HideHighlight()
         {
             if (hlRibbon != null && hlRibbon.enabled)
                 hlRibbon.enabled = false;
+            // Alla prossima comparsa la striscia si posiziona subito, senza scivolare da qui.
+            hlGeom?.ResetSmoothing();
         }
 
         void PulseBrush(float duration) => brushHapticTimer = Mathf.Max(brushHapticTimer, duration);
