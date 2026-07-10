@@ -55,6 +55,10 @@ namespace MixedRealityProject.Drawing
                 ["action.save"]      = "save",
                 ["action.load"]      = "load",
                 ["action.clearAll"]  = "delete all",
+                // -- conferma "delete all" --
+                ["confirm.clearAll"] = "Are you sure to delete all?",
+                ["confirm.yes"]      = "Yes",
+                ["confirm.no"]       = "No",
                 // -- menu Options --
                 ["options"]          = "Options",
                 ["viewShortcuts"]    = "View Shortcuts",
@@ -104,6 +108,9 @@ namespace MixedRealityProject.Drawing
                 ["action.save"]      = "salva",
                 ["action.load"]      = "carica",
                 ["action.clearAll"]  = "canc. tutto",
+                ["confirm.clearAll"] = "Sei sicuro di voler cancellare tutto?",
+                ["confirm.yes"]      = "Sì",
+                ["confirm.no"]       = "No",
                 ["options"]          = "Opzioni",
                 ["viewShortcuts"]    = "Scorciatoie",
                 ["language"]         = "Lingua",

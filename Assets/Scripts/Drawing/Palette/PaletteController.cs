@@ -127,13 +127,20 @@ namespace MixedRealityProject.Drawing
         GameObject shortcutsPanel;
         bool shortcutsOpen;
 
+        // Pannello di conferma "Delete all" (modale Sì/No): il bottone "clear" della striscia
+        // azioni non svuota più subito la scena ma apre questa richiesta di conferma. Come
+        // optionsPanel vive a parte e non viene distrutto dal Rebuild.
+        GameObject confirmClearPanel;
+        bool confirmClearOpen;
+
         // Geometria per ancorare i pop-up (Options/Shortcuts) accanto al bottone ellipsi
         // (...) della striscia azioni: lato (destra per i destri), bordo esterno X della
         // striscia e Y del bottone. Aggiornati a ogni BuildPanel; letti da PositionMenus.
         float menuSide = 1f;
         float actionStripOuterX;
         float optionsButtonY;
-        Vector2 optionsSize, shortcutsSize;
+        float clearButtonY; // Y del bottone "clear": ci si ancora la conferma Sì/No
+        Vector2 optionsSize, shortcutsSize, confirmClearSize;
 
         // Camera.main fa una FindGameObjectWithTag interna a ogni chiamata: la testa
         // non cambia, quindi la cachiamo una volta invece di interrogarla per frame.
@@ -198,6 +205,7 @@ namespace MixedRealityProject.Drawing
             BuildPanel();
             BuildOptionsPanel(); // sotto-pannello impostazioni (separato, sopravvive ai Rebuild)
             BuildShortcutsPanel(); // pannello scorciatoie in sola lettura (aperto da Options)
+            BuildConfirmClearPanel(); // conferma Sì/No del "Delete all" (aperta dalla striscia azioni)
             PositionMenus(); // ancora i pop-up accanto al bottone ellipsi, sul lato giusto
             // Tutti i controlli appena creati vanno sul layer della palette (per il ray).
             SetLayerRecursively(gameObject, PaletteLayer);
@@ -302,14 +310,18 @@ namespace MixedRealityProject.Drawing
 
             // I popup Options/Shortcuts seguono il pannello: visibili solo se aperti E la
             // palette è aperta. Shortcuts sta "sopra" Options (lo nasconde mentre è aperto).
+            bool showConfirm = confirmClearOpen && active;
             bool showShortcuts = shortcutsOpen && active;
-            bool showOptions = optionsOpen && active && !showShortcuts;
+            bool showOptions = optionsOpen && active && !showShortcuts && !showConfirm;
+            if (confirmClearPanel != null && confirmClearPanel.activeSelf != showConfirm)
+                confirmClearPanel.SetActive(showConfirm);
             if (optionsPanel != null && optionsPanel.activeSelf != showOptions)
                 optionsPanel.SetActive(showOptions);
             if (shortcutsPanel != null && shortcutsPanel.activeSelf != showShortcuts)
                 shortcutsPanel.SetActive(showShortcuts);
             // Modale: mentre un popup è mostrato, il resto della palette non è interagibile.
-            ModalRoot = showShortcuts ? shortcutsPanel.transform
+            ModalRoot = showConfirm ? confirmClearPanel.transform
+                      : showShortcuts ? shortcutsPanel.transform
                       : showOptions ? optionsPanel.transform
                       : null;
         }
@@ -783,6 +795,7 @@ namespace MixedRealityProject.Drawing
             if (panel != null) Destroy(panel);
             if (optionsPanel != null) Destroy(optionsPanel);
             if (shortcutsPanel != null) Destroy(shortcutsPanel);
+            if (confirmClearPanel != null) Destroy(confirmClearPanel);
             toggleSync.Clear();
             optionsSync.Clear(); // i sync di Options puntano a renderer ora distrutti
             sizeControls.Clear();
@@ -798,6 +811,7 @@ namespace MixedRealityProject.Drawing
             BuildPanel();
             BuildOptionsPanel();
             BuildShortcutsPanel();
+            BuildConfirmClearPanel();
             PositionMenus();
             SetLayerRecursively(gameObject, PaletteLayer);
             RefreshRecents();
@@ -826,6 +840,15 @@ namespace MixedRealityProject.Drawing
                 float cx = actionStripOuterX + menuSide * (gap + shortcutsSize.x * 0.5f);
                 // Pannello più alto: centrato verticalmente sulla palette così resta intero.
                 shortcutsPanel.transform.localPosition = new Vector3(cx, 0f, -0.022f);
+            }
+
+            if (confirmClearPanel != null)
+            {
+                float cx = actionStripOuterX + menuSide * (gap + confirmClearSize.x * 0.5f);
+                // Centrato sul bottone "clear", vincolato entro l'altezza della palette.
+                float cy = Mathf.Clamp(clearButtonY,
+                    -paletteHalfH + confirmClearSize.y * 0.5f, paletteHalfH - confirmClearSize.y * 0.5f);
+                confirmClearPanel.transform.localPosition = new Vector3(cx, cy, -0.02f);
             }
         }
 
@@ -1003,6 +1026,83 @@ namespace MixedRealityProject.Drawing
             list.SetActive(false); // chiuso all'avvio: si vede solo l'header con la lingua attiva
         }
 
+        // Pannello di conferma "Delete all": messaggio + bottoni Sì/No. Stessa impostazione
+        // modale di Options (MakeRounded + FacePlayer + collider di superficie); la posizione
+        // accanto al bottone "clear" della striscia azioni è data da PositionMenus.
+        void BuildConfirmClearPanel()
+        {
+            var size = new Vector2(0.26f, 0.13f);
+            confirmClearSize = size;
+            confirmClearPanel = MakeRounded(transform, "ConfirmClearPanel", Vector3.zero,
+                size, 0.026f, PanelColor, QueuePanel);
+            confirmClearPanel.AddComponent<FacePlayer>(); // guarda sempre l'utente quando aperto
+            AddModalSurfaceCollider(confirmClearPanel, size); // ray visibile su tutta l'area
+
+            // Messaggio nella metà alta del pannello.
+            MakeLabel(confirmClearPanel.transform, Localization.Get("confirm.clearAll"),
+                new Vector3(0f, size.y * 0.22f, -0.004f),
+                new Vector2(size.x - 0.03f, 0.045f), SliderLabelFont * 1.38f,
+                TextAlignmentOptions.Center, autoFit: true);
+
+            // Sì/No affiancati, stessa geometria dei segmenti handedness di Options.
+            const float segGap = 0.006f;
+            const float rowH = 0.05f;
+            float rowW = size.x - 0.05f;
+            float segW = (rowW - segGap) * 0.5f;
+            float segCorner = Mathf.Min(0.014f, rowH * 0.4f);
+            float segDX = (segW + segGap) * 0.5f;
+            float rowY = -size.y * 0.22f;
+
+            // Il suono lo dà MenuToggle alla chiusura (come la ✕ di Options): niente click
+            // di default su Sì/No, sarebbe sovrapposto.
+            var yes = MakeRoundedButton(confirmClearPanel.transform, "ConfirmClearYes",
+                new Vector3(-segDX, rowY, -0.004f), new Vector2(segW, rowH), segCorner,
+                ButtonColor, ConfirmClearAll);
+            yes.GetComponent<PaletteButton>().SilentPress = true;
+            MakeLabel(yes.transform, Localization.Get("confirm.yes"),
+                new Vector3(0f, 0f, -0.004f), new Vector2(segW - 0.012f, rowH),
+                SliderLabelFont * 1.38f, TextAlignmentOptions.Center, autoFit: true);
+
+            var no = MakeRoundedButton(confirmClearPanel.transform, "ConfirmClearNo",
+                new Vector3(segDX, rowY, -0.004f), new Vector2(segW, rowH), segCorner,
+                ButtonColor, CloseConfirmClearPanel);
+            no.GetComponent<PaletteButton>().SilentPress = true;
+            MakeLabel(no.transform, Localization.Get("confirm.no"),
+                new Vector3(0f, 0f, -0.004f), new Vector2(segW - 0.012f, rowH),
+                SliderLabelFont * 1.38f, TextAlignmentOptions.Center, autoFit: true);
+
+            SetLayerRecursively(confirmClearPanel, PaletteLayer);
+            confirmClearPanel.SetActive(false);
+        }
+
+        // Apre la conferma dal bottone "clear" della striscia azioni. SetActive/ModalRoot li
+        // sincronizza AnimateVisibility ogni frame, come per Options/Shortcuts.
+        void OpenConfirmClearPanel()
+        {
+            confirmClearOpen = true;
+            isOpen = true; // palette chiusa (es. da scorciatoia): la conferma la apre insieme a sé
+            UiFeedback.Instance?.MenuToggle(true);
+        }
+
+        /// <summary>Apre la conferma "Delete all" da fuori (scorciatoia controller B/Y tenuto).</summary>
+        public void OpenConfirmClear() => OpenConfirmClearPanel();
+
+        void CloseConfirmClearPanel()
+        {
+            confirmClearOpen = false;
+            if (confirmClearPanel != null)
+                confirmClearPanel.SetActive(false);
+            ModalRoot = null;
+            UiFeedback.Instance?.MenuToggle(false);
+        }
+
+        // Sì: svuota davvero la scena (stessa logica di prima) e chiude la conferma.
+        void ConfirmClearAll()
+        {
+            DrawingStore.NewScene();
+            CloseConfirmClearPanel();
+        }
+
         // Toggle unico del menu (☰ del controller sinistro e bottone "..." nella palette):
         // - se è aperto QUALCOSA del menu (Options, o le Shortcuts che gli stanno sopra) chiude
         //   TUTTO il menu, lasciando la palette aperta;
@@ -1018,6 +1118,7 @@ namespace MixedRealityProject.Drawing
             else
             {
                 optionsOpen = true;
+                confirmClearOpen = false; // il menu prende il posto di un'eventuale conferma aperta
                 isOpen = true; // palette chiusa: il menu la apre insieme a sé
             }
             UiFeedback.Instance?.MenuToggle(optionsOpen);
@@ -1431,7 +1532,7 @@ namespace MixedRealityProject.Drawing
                 ("undo",  "action.undo",     StrokeHistory.Undo),
                 ("save",  "action.save",     DrawingStore.Save),
                 ("load",  "action.load",     DrawingStore.Load),
-                ("clear", "action.clearAll", DrawingStore.NewScene),
+                ("clear", "action.clearAll", OpenConfirmClearPanel), // conferma Sì/No prima di svuotare
                 ("options", "options",       ToggleOptionsPanel), // apre il menu impostazioni
             };
 
@@ -1471,6 +1572,14 @@ namespace MixedRealityProject.Drawing
                     optionsButtonY = y;
                     OptionsToggleButton = b;
                     // Il suono lo dà MenuToggle: niente click di default (evita sovrapposizione).
+                    b.GetComponent<PaletteButton>().SilentPress = true;
+                }
+
+                // Il bottone "clear" apre il modale di conferma: come per Options il suono
+                // lo dà MenuToggle, niente click di default.
+                if (actions[i].name == "clear")
+                {
+                    clearButtonY = y;
                     b.GetComponent<PaletteButton>().SilentPress = true;
                 }
 

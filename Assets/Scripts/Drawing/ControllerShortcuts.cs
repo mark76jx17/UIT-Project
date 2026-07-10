@@ -15,7 +15,8 @@ namespace MixedRealityProject.Drawing
     ///
     /// Convenzioni vs scelte di progetto:
     ///  - CONVENZIONE: Undo/Redo sulla mano non dominante (palette), come in Open Brush;
-    ///    "Delete all" richiede una pressione prolungata (hold-to-confirm) per sicurezza.
+    ///    "Delete all" richiede una pressione prolungata per sicurezza, che apre la stessa
+    ///    conferma Sì/No del bottone della palette (vedi PaletteController.OpenConfirmClear).
     ///  - DI PROGETTO: tutte le direzioni/click dello stick e i face button per
     ///    Options/Save/Load. Non esiste una convenzione consolidata che leghi questi
     ///    comandi-palette a pulsanti del controller (Gravity Sketch/Open Brush usano menu
@@ -100,16 +101,16 @@ namespace MixedRealityProject.Drawing
             }
 
             // Delete all = B/Y tenuto premuto ~1.5s e SOLO se non si sta afferrando: il
-            // tap di B/Y mentre afferri è già "duplica" (GrabController), e l'hold evita
-            // cancellazioni accidentali di tutta la scena.
+            // tap di B/Y mentre afferri è già "duplica" (GrabController). A fine hold non
+            // si svuota subito: si apre la stessa conferma Sì/No del bottone della palette.
             bool gripping = OVRInput.Get(OVRInput.Axis1D.PrimaryHandTrigger, c) >= GripThreshold;
             if (!gripping && OVRInput.Get(OVRInput.Button.Two, c))
             {
                 deleteHold += Time.deltaTime;
                 if (!deleteFired && deleteHold >= DeleteHoldSeconds)
                 {
-                    DrawingStore.NewScene();
-                    Toast.Show("Cleared all");
+                    if (Palette != null)
+                        Palette.OpenConfirmClear(); // conferma Sì/No, come dal bottone della palette
                     deleteFired = true;
                 }
             }
