@@ -466,6 +466,21 @@ verificare sul device. (Stessa causa potenziale su `AlphaSlider`/`ColorPreview`,
 trasparenti **di proposito** su scacchiera: lì il buco mostrerebbe passthrough invece della
 scacchiera — se in VR si nota, applicare lo stesso `PreserveDestAlpha`.)
 
+#### Aggiornamento (2026-07-10) — icona sulla PUNTA del pennello (glifo che fluttua libero)
+
+Stesso sintomo, contesto diverso: l'icona dello strumento/le 4 frecce sulla **punta** del
+pennello sono un quad trasparente che **fluttua libero** (non appoggiato a un controllo opaco).
+Allineandolo alla palette o a un disegno, lo sfondo trasparente del glifo **bucava** mostrando il
+passthrough invece della palette/disegno dietro (si vedeva il "quadrato" dell'immagine).
+
+Qui `PreserveDestAlpha` (blend `Zero/One`) **non** va bene: azzererebbe la scrittura dell'alpha
+anche sul **glifo**, rendendolo invisibile sopra il passthrough (dove deve invece occludere). Serve
+un blend alpha **"over"**: nuovo `BrushMaterials.CompositeAlphaOver(material)` = `_SrcBlendAlpha`
+**One** / `_DstBlendAlpha` **OneMinusSrcAlpha** → `alpha_out = alpha_glifo + alpha_dietro·(1−alpha_glifo)`.
+Così il glifo pieno scrive alpha 1 (occlude, visibile sul passthrough) e lo sfondo trasparente
+**preserva** l'alpha di ciò che sta dietro (palette/disegno opachi restano visibili; sul vuoto resta
+il passthrough). Applicato a `cursorIconMat` in `BrushController`.
+
 ### Step 13 — allineamento riga colore (ruota · checker · luminosità) (2026-06-25)
 Feedback utente: i tre elementi della riga colore erano **asimmetrici**. Cause: il checker
 (`ColorPreview`) era alto `0.80` della riga (più basso della ruota) e lo slider luminosità

@@ -83,6 +83,11 @@ namespace MixedRealityProject.Drawing
             // Mentre la palette viene trascinata i bottoni "passano" sopra la punta: niente press.
             if (PaletteController.IsGrabbing)
                 return;
+            // Punta nella banda sottile lungo il bordo (zona di grab): niente press. Chi porta la
+            // punta sul bordo sta andando a sollevare la palette; la banda è stretta apposta, così
+            // i bottoni interni e il corpo delle strisce restano premibili senza problemi.
+            if (PaletteController.IsInEdgeGuard(other.transform.position))
+                return;
             Press();
         }
 

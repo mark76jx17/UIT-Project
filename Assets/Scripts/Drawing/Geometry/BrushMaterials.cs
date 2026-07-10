@@ -141,6 +141,22 @@ namespace MixedRealityProject.Drawing
             material.SetInt("_DstBlendAlpha", (int)BlendMode.One);
         }
 
+        /// <summary>
+        /// Per glifi/icone trasparenti che FLUTTANO liberi (es. l'icona sulla punta del
+        /// pennello), non appoggiati su un controllo opaco: il glifo deve OCCLUDERE il
+        /// passthrough dove è pieno (scrivere alpha), ma lo sfondo trasparente deve
+        /// PRESERVARE l'alpha di ciò che sta dietro (palette/disegno) invece di sovrascriverlo
+        /// a 0 e "bucare" l'occlusione. Blend alpha "over": SrcAlpha=One, DstAlpha=OneMinusSrcAlpha
+        /// → alpha_out = alpha_glifo + alpha_dietro·(1 − alpha_glifo). Così sopra il vuoto il
+        /// glifo occlude (alpha 1) e lo sfondo lascia il passthrough; sopra la palette/disegno lo
+        /// sfondo lascia intatto l'alpha=1 di dietro (si vede la palette, non un buco).
+        /// </summary>
+        public static void CompositeAlphaOver(Material material)
+        {
+            material.SetInt("_SrcBlendAlpha", (int)BlendMode.One);
+            material.SetInt("_DstBlendAlpha", (int)BlendMode.OneMinusSrcAlpha);
+        }
+
         static void MakeTransparent(Material material)
         {
             material.SetFloat("_Surface", 1f); // 1 = Transparent

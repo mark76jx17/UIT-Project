@@ -159,6 +159,8 @@ namespace MixedRealityProject.Drawing
         Transform cursorIcon;
         Material cursorIconMat;
         ToolMode lastIconTool = (ToolMode)(-1);
+        bool lastMoveHint;                 // stato "icona sposta" mostrato, per aggiornare solo al cambio
+        const float MoveIconScale = 1.7f;  // icona 4 frecce più grande dell'icona strumento (ben visibile)
         Transform headCached;
 
         // Anteprima gomma (oggetto sotto la punta) e hint del magnete (punto di aggancio).
@@ -220,6 +222,10 @@ namespace MixedRealityProject.Drawing
             iconGO.transform.localPosition = tipOffset + new Vector3(0f, 0.035f, 0f);
             iconGO.AddComponent<MeshFilter>().mesh = RoundedMesh.TexturedQuad(0.02f, 0.02f);
             cursorIconMat = BrushMaterials.CreateUnlit(Color.white);
+            // L'icona fluttua libera sopra la punta: senza questo lo sfondo trasparente del glifo
+            // sovrascrive l'alpha del framebuffer e, sopra la palette/un disegno, "buca" mostrando
+            // il passthrough invece di ciò che sta dietro (si vedeva il quadrato dell'immagine).
+            BrushMaterials.CompositeAlphaOver(cursorIconMat);
             iconGO.AddComponent<MeshRenderer>().material = cursorIconMat;
             cursorIcon = iconGO.transform;
 
@@ -388,22 +394,28 @@ namespace MixedRealityProject.Drawing
                 StrokeSettings.EraserMode ? EraserCursorColor : StrokeSettings.Color);
         }
 
-        // Icona dello strumento sulla punta: cambia texture solo al cambio di strumento,
+        // Icona sulla punta: normalmente lo strumento corrente; nel raggio di grab della palette
+        // diventa le 4 frecce "sposta" (più grande). Cambia texture solo al cambio di stato,
         // si nasconde mentre disegni e si gira verso la testa.
         void UpdateCursorIcon()
         {
             if (cursorIcon == null)
                 return;
             var tool = StrokeSettings.Tool;
-            if (tool != lastIconTool)
+            bool moveHint = PaletteController.MoveHintActive;
+            if (moveHint != lastMoveHint || tool != lastIconTool)
             {
+                lastMoveHint = moveHint;
                 lastIconTool = tool;
-                string icon = tool == ToolMode.Delete ? "close"
+                string icon = moveHint ? "move"
+                            : tool == ToolMode.Delete ? "close"
                             : tool == ToolMode.Eraser ? "eraser"
                             : tool == ToolMode.Fill ? "droplet"
                             : "pencil";
                 cursorIconMat.SetTexture(BaseMapId, ToolIcon.Get(icon));
             }
+            // In modalità "sposta" l'icona è ingrandita per essere ben leggibile.
+            cursorIcon.localScale = Vector3.one * (moveHint ? MoveIconScale : 1f);
             bool show = !IsDrawing;
             if (cursorIcon.gameObject.activeSelf != show)
                 cursorIcon.gameObject.SetActive(show);

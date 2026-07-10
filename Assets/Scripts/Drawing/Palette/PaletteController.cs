@@ -203,6 +203,21 @@ namespace MixedRealityProject.Drawing
         // presa dei tratti viene soppressa, così il grip muove la palette e non i tratti.
         public static bool SuppressBrushGrab;
 
+        // True quando il controller-pennello è nel raggio di grab della palette (il ribbon sta
+        // comparendo) o la sta trascinando: il BrushController mostra sulla punta l'icona
+        // "sposta" (4 frecce) al posto dell'icona dello strumento.
+        public static bool MoveHintActive;
+
+        // Istanza corrente (per le query statiche che servono la geometria del pannello, es. la
+        // guardia anti-misclick sul bordo). Una sola palette in scena.
+        static PaletteController instance;
+        // Banda sottile lungo la linea del bordo dove i poke sui bottoni sono soppressi: chi
+        // porta la punta sul bordo vuole sollevare la palette, non premere un bottone lì. Stretta
+        // apposta, così non blocca i bottoni interni né il corpo delle strisce laterali.
+        const float EdgeGuard = 0.02f;
+
+        void Awake() => instance = this;
+
         void Start()
         {
             transform.localPosition = localOffset;
@@ -231,6 +246,18 @@ namespace MixedRealityProject.Drawing
             SuppressBrushGrab = false; // non lasciare il grip tratti soppresso se la palette sparisce
             Placed = false;
             IsGrabbing = false;
+            MoveHintActive = false;
+            if (instance == this)
+                instance = null;
+        }
+
+        /// <summary>True se worldPoint cade nella banda sottile lungo il bordo del pannello,
+        /// dove i poke sui bottoni vanno soppressi (zona di grab). Palette aperta richiesta.</summary>
+        public static bool IsInEdgeGuard(Vector3 worldPoint)
+        {
+            if (instance == null || instance.panel == null || !instance.isOpen)
+                return false;
+            return instance.DistanceToPanelEdge(worldPoint) <= EdgeGuard;
         }
 
         // Differisce la ricostruzione: vedi `languageDirty`.
@@ -385,6 +412,7 @@ namespace MixedRealityProject.Drawing
             if (Brush == null || !UnityEngine.XR.XRSettings.isDeviceActive)
             {
                 SuppressBrushGrab = false;
+                MoveHintActive = false;
                 HideHighlight();
                 return;
             }
@@ -399,6 +427,7 @@ namespace MixedRealityProject.Drawing
             {
                 brushNearPalette = false;
                 SuppressBrushGrab = false;
+                MoveHintActive = false;
                 HideHighlight();
                 return;
             }
@@ -407,6 +436,10 @@ namespace MixedRealityProject.Drawing
             // pannello: la palette si solleva avvicinandosi a un'area vicina al bordo, non al centro.
             float edgeDist = DistanceToPanelEdge(brushPos);
             bool inGrabRange = edgeDist <= GrabRange;
+
+            // Icona "sposta" sulla punta: quando il ribbon compare (entro HighlightRange) o si
+            // sta già trascinando. Coincide col raggio in cui l'affordance di grab è visibile.
+            MoveHintActive = grabbing || edgeDist <= HighlightRange;
 
             // Impulso leggero quando ENTRI nel raggio di presa (affordance "agganciabile").
             if (inGrabRange && !brushNearPalette && !grabbing)

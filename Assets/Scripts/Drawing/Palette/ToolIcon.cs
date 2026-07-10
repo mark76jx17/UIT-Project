@@ -35,6 +35,7 @@ namespace MixedRealityProject.Drawing
                 case "load": SaveLoad(down: false); break;
                 case "clear": Trash(); break;
                 case "options": Gear(); break;
+                case "move": Move(); break;
                 case "close": Cross(); break;
                 case "chevron": Chevron(); break;
                 case "bolt": Bolt(); break;
@@ -207,6 +208,25 @@ namespace MixedRealityProject.Drawing
                 // anello: dentro se rHole < r < outer → intersezione (max delle due pareti)
                 return Mathf.Max(r - outer, rHole - r);
             });
+        }
+
+        // Quattro frecce (su/giù/sinistra/destra): affordance "sposta" mostrata sulla punta
+        // quando ci si avvicina al bordo della palette per sollevarla. Croce di aste + 4 teste.
+        static void Move()
+        {
+            const float sh = 0.40f;   // lunghezza asta dal centro
+            const float th = 0.070f;  // mezzo spessore asta
+            const float head = 0.19f; // semi-larghezza base della freccia
+            const float tip = 0.60f;  // punta della freccia
+            const float b = sh - 0.02f; // base delle teste, appena dentro la fine dell'asta
+            // aste (croce)
+            Seg(new(-sh, 0f), new(sh, 0f), th);
+            Seg(new(0f, -sh), new(0f, sh), th);
+            // teste
+            Tri(new(tip, 0f), new(b, head), new(b, -head));       // destra
+            Tri(new(-tip, 0f), new(-b, head), new(-b, -head));    // sinistra
+            Tri(new(0f, tip), new(head, b), new(-head, b));       // su
+            Tri(new(0f, -tip), new(head, -b), new(-head, -b));    // giù
         }
 
         // X di chiusura: due segmenti diagonali con estremità arrotondate (SDF), molto più

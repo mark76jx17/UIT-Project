@@ -85,6 +85,28 @@ Tre rifiniture dopo il test in visore, per rendere l'interazione più comprensib
    quadretti → ne beneficia anche lui); lo smoothing è opzionale (default 0 = immediato, il foglio
    resta com'era).
 
+## Aggiornamento (2026-07-10, 2) — icona "sposta" sulla punta + guardia anti-misclick sul bordo
+
+Due aiuti per rendere il grab **comprensibile** e a prova di errore:
+
+1. **Icona "sposta" (4 frecce) sulla punta.** Quando il controller-pennello entra nel raggio in
+   cui il ribbon compare (entro `HighlightRange` dal bordo) o mentre trascina, l'icona sulla punta
+   **diventa le 4 frecce** (`ToolIcon.Move`, glifo `"move"`) al posto dell'icona dello strumento,
+   **ingrandita** (`MoveIconScale = 1.7`) per essere ben visibile: comunica "qui puoi sollevare la
+   palette". `PaletteController.MoveHintActive` (statico) è alzato in `UpdatePlacement`
+   (`grabbing || edgeDist <= HighlightRange`); `BrushController.UpdateCursorIcon` lo legge e scambia
+   texture/scala solo al cambio di stato. Fuori dal raggio torna l'icona dello strumento a scala 1.
+
+2. **Guardia anti-misclick sul bordo.** Vicino al bordo/agli angoli ci sono bottoni (strisce
+   laterali) che si potrebbero premere per sbaglio mentre si va a sollevare la palette. Ora un poke
+   nella **banda sottile lungo la linea del bordo** (`EdgeGuard = 0.02 m`) viene **soppresso**:
+   `PaletteController.IsInEdgeGuard(worldPoint)` (palette aperta + `DistanceToPanelEdge ≤ EdgeGuard`)
+   è consultato in `PaletteButton.OnTriggerEnter` prima di premere. La banda è **stretta apposta**:
+   copre solo la fascia a ridosso del bordo (dove chi arriva sta andando a fare grab), non i bottoni
+   interni né il **corpo** delle strisce (che si poke-ano ben oltre i 2 cm dal bordo) → non si
+   verifica il problema opposto (voler premere un bottone e finire a spostare). Tarabile con
+   `EdgeGuard`. Riguarda solo il **poke**; il ray (a distanza) non è coinvolto.
+
 ## Interazione quando è fissata (poke + ray, entrambi i controller)
 
 Da fissata nella stanza la palette si comanda anche col **secondo controller** (quello che la
@@ -159,7 +181,8 @@ agganciata/pinned). In edit mode niente `Update`/grab (nessuno script è `Execut
 ## Parametri tarabili
 `HighlightRange` (0.15), `GrabRange` (0.09), `GripPress`/`GripRelease` (0.55/0.35); striscia:
 `HlThick` (0.008)/`HlWindow`/`HlWindowSegs`/`PanelCorner`/`RibbonSmooth` (0.05) + `EndRound` (0.12)
-in `GrabRibbon` + alpha in `UpdateHighlight`; durate `PulseBrush`.
+in `GrabRibbon` + alpha in `UpdateHighlight`; durate `PulseBrush`; `EdgeGuard` (0.02, banda
+anti-misclick sul bordo); `MoveIconScale` (1.7, dimensione icona "sposta" sulla punta).
 
 ## Verifica
 Compilazione 0 errori; preview statici invariati (highlight inattivo a riposo → nessuna regressione
