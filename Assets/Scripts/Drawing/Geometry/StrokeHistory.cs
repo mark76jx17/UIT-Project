@@ -42,21 +42,39 @@ namespace MixedRealityProject.Drawing
         static readonly List<Action> undo = new();
         static readonly List<Action> redo = new();
 
+        /// <summary>Numero di "disegni" registrati da inizio sessione (tratti/tap/fill che
+        /// AGGIUNGONO oggetti). Monotono crescente, non decrementa con l'undo: serve solo come
+        /// segnale "l'utente ha disegnato qualcosa" (usato dal tutorial guidato).</summary>
+        public static int DrawCount { get; private set; }
+
+        /// <summary>Numero di "cancellazioni" registrate da inizio sessione (gomma piena o
+        /// parziale). Monotono crescente: segnale "l'utente ha cancellato qualcosa" (tutorial).</summary>
+        public static int EraseCount { get; private set; }
+
         public static void Push(GameObject stroke) => PushGroup(stroke);
 
         public static void PushGroup(params GameObject[] strokes)
-            => Add(new Action { added = strokes });
+        {
+            DrawCount++;
+            Add(new Action { added = strokes });
+        }
 
         /// <summary>Cancellazione: il chiamante ha già nascosto gli oggetti.</summary>
         public static void PushErase(params GameObject[] strokes)
-            => Add(new Action { removed = strokes });
+        {
+            EraseCount++;
+            Add(new Action { removed = strokes });
+        }
 
         /// <summary>
         /// Sostituzione (cancellazione parziale): <paramref name="removed"/> già nascosti,
         /// <paramref name="added"/> i pezzi rimasti — un solo passo di undo.
         /// </summary>
         public static void PushReplace(GameObject[] removed, GameObject[] added)
-            => Add(new Action { removed = removed, added = added });
+        {
+            EraseCount++;
+            Add(new Action { removed = removed, added = added });
+        }
 
         /// <summary>
         /// Unione magnete di un oggetto già disegnato sotto un altro (l'unione è già

@@ -107,6 +107,17 @@ namespace MixedRealityProject.Drawing
             shortcuts.Palette = palette;
             shortcuts.Head = eyeAnchor;
 
+            // Tutorial guidato: al primo avvio propone il welcome (lingua + Sì/No); riprendibile
+            // dal menu Options. Tutta la UI è creata a runtime dal controller.
+            var tutorialGO = new GameObject("Tutorial");
+            var tutorial = tutorialGO.AddComponent<TutorialController>();
+            tutorial.Brush = brush;
+            tutorial.Palette = palette;
+            tutorial.Head = eyeAnchor;
+            tutorial.PaletteHand = paletteAnchor;
+            tutorial.BrushHand = brushAnchor;
+            Debug.Log("[Tutorial] DrawingRig created TutorialController");
+
             // Toggle "Left-Handed Mode" dal menu Options: riapplica le mani a runtime.
             StrokeSettings.LeftHandedChanged += ApplyHandedness;
 

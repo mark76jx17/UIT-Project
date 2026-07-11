@@ -14,7 +14,7 @@ namespace MixedRealityProject.Drawing
     /// Il tasto X (mano della palette) apre/chiude il pannello con un'animazione di
     /// scala; il pannello si nasconde anche mentre si disegna.
     /// </summary>
-    public class PaletteController : MonoBehaviour
+    public partial class PaletteController : MonoBehaviour
     {
         [Header("Aggancio al polso (regolabili da Inspector)")]
         public Vector3 localOffset = new(0f, 0.06f, 0.04f);
@@ -1057,6 +1057,8 @@ namespace MixedRealityProject.Drawing
             var ddSize = new Vector2(langRowW * 0.56f, 0.044f);
             var ddCenter = new Vector3(langRowW * 0.5f - ddSize.x * 0.5f, langRowY, -0.004f);
             BuildLanguageDropdown(optionsPanel.transform, ddCenter, ddSize);
+
+            BuildTutorialOptionsRow(optionsPanel.transform, size); // voce "Tutorial" (partial)
 
             SetLayerRecursively(optionsPanel, PaletteLayer);
             optionsPanel.SetActive(false);
