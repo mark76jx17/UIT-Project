@@ -32,7 +32,7 @@ namespace MixedRealityProject.Drawing
             var forward = reference.forward;
             forward.y = 0f;
             forward = forward.sqrMagnitude < 1e-6f ? Vector3.forward : forward.normalized;
-            planePoint = reference.position + forward * 0.5f;
+            planePoint = reference.position + forward * 0.7f; // un po' più lontano dalla faccia
             planeNormal = Vector3.Cross(Vector3.up, forward).normalized;
 
             visual = BuildVisual();

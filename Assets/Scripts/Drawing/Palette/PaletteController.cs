@@ -759,7 +759,8 @@ namespace MixedRealityProject.Drawing
             MakeToggleButton("pressure", pressureCell,
                 () => StrokeSettings.SizeMode == SizeMode.PressureBrush,
                 () => StrokeSettings.SizeMode = StrokeSettings.SizeMode == SizeMode.PressureBrush
-                    ? SizeMode.FixedPen : SizeMode.PressureBrush);
+                    ? SizeMode.FixedPen : SizeMode.PressureBrush,
+                penOnly: true); // pressione = solo disegno: disattivato in Cancella/Riempi/Elimina
 
             var sizeRow = layout.Row(0.024f);
             var sizeLabel = sizeRow.Left(0.055f);
@@ -1877,19 +1878,24 @@ namespace MixedRealityProject.Drawing
         // Toggle compatto: bottone che si illumina (accent) quando attivo. Niente pillola.
         // I toggle del pannello principale usano panel.transform + toggleSync (svuotato dal
         // Rebuild); il sotto-pannello Options passa il proprio parent e la propria lista.
-        void MakeToggleButton(string labelKey, Cell cell, System.Func<bool> isOn, System.Action onToggle)
-            => MakeToggleButton(labelKey, cell, isOn, onToggle, panel.transform, toggleSync);
+        void MakeToggleButton(string labelKey, Cell cell, System.Func<bool> isOn, System.Action onToggle,
+            bool penOnly = false)
+            => MakeToggleButton(labelKey, cell, isOn, onToggle, panel.transform, toggleSync, penOnly);
 
         // labelKey: chiave di localizzazione; resta nel nome del GameObject, il testo mostrato
         // è la traduzione.
         void MakeToggleButton(string labelKey, Cell cell, System.Func<bool> isOn, System.Action onToggle,
-            Transform parent, List<System.Action> sync)
+            Transform parent, List<System.Action> sync, bool penOnly = false)
         {
             var b = MakeRoundedButton(parent, labelKey + "Toggle", cell.Center, cell.Size,
                 Mathf.Min(0.012f, cell.Size.y * 0.4f), ButtonColor, onToggle);
 
+            // Draw-only: es. Pressure riguarda solo il disegno (la gomma usa lo spessore fisso),
+            // quindi fuori da Draw il toggle è disattivato e sbiadito.
+            if (penOnly)
+                RegisterPenOnlyControl(b);
+
             // È un toggle: il feedback userà il suono on/off in base al nuovo stato.
-            // (Pressure non è più registrato come controllo draw-only: resta sempre attivo.)
             b.GetComponent<PaletteButton>().ToggleState = isOn;
             MakeLabel(b.transform, Localization.Get(labelKey), new Vector3(0f, 0f, -0.004f), cell.Size, ToggleFont, TextAlignmentOptions.Center, autoFit: true);
             var r = b.GetComponent<Renderer>();

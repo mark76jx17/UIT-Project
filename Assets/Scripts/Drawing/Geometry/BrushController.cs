@@ -31,6 +31,13 @@ namespace MixedRealityProject.Drawing
         [SerializeField] float pressThreshold = 0.55f;
         [SerializeField] float releaseThreshold = 0.35f;
 
+        [Tooltip("Solo in modalità Pressione: soglie BASSE di inizio/fine tratto, così basta " +
+                 "sfiorare il trigger per partire con un tratto sottile e ingrossare fino a piena " +
+                 "pressione. In spessore fisso restano le soglie 'click' qui sopra. L'isteresi " +
+                 "(start > release) evita avvii involontari dal rumore del trigger a riposo.")]
+        [SerializeField] float pressureStartThreshold = 0.06f;
+        [SerializeField] float pressureReleaseThreshold = 0.04f;
+
         [Header("Campionamento")]
         [Tooltip("Distanza minima tra due campioni: da fermo non si accumulano punti.")]
         [SerializeField] float minSampleDistance = 0.005f;
@@ -350,9 +357,9 @@ namespace MixedRealityProject.Drawing
                 return;
             }
 
-            if (!pressed && trigger >= pressThreshold)
+            if (!pressed && trigger >= PenPressThreshold)
                 BeginPress(position, trigger);
-            else if (pressed && trigger <= releaseThreshold)
+            else if (pressed && trigger <= PenReleaseThreshold)
                 EndPress(position);
             else if (pressed)
                 ContinuePress(position, trigger);
@@ -371,14 +378,23 @@ namespace MixedRealityProject.Drawing
             hapticTimer = duration;
         }
 
+        // Soglie del gate di DISEGNO (solo penna): in modalità Pressione partono basse (basta
+        // sfiorare → tratto sottile), in spessore fisso restano le soglie "click" a metà corsa.
+        // Non toccano fill/gomma/elimina, che restano su pressThreshold (azioni "a click").
+        float PenPressThreshold =>
+            StrokeSettings.SizeMode == SizeMode.PressureBrush ? pressureStartThreshold : pressThreshold;
+        float PenReleaseThreshold =>
+            StrokeSettings.SizeMode == SizeMode.PressureBrush ? pressureReleaseThreshold : releaseThreshold;
+
         // Lo slider "size" decide lo spessore base (vale sempre); con Pressure ON
-        // la pressione del trigger lo modula da minPressureFraction a 1.
+        // la pressione del trigger lo modula da minPressureFraction a 1, mappata sull'INTERA
+        // corsa utile (dall'inizio-tratto a piena pressione), non da metà corsa.
         float TriggerToRadius(float trigger)
         {
             float baseRadius = StrokeSettings.FixedRadius;
             if (StrokeSettings.SizeMode != SizeMode.PressureBrush)
                 return baseRadius;
-            float p = Mathf.InverseLerp(pressThreshold, 1f, trigger);
+            float p = Mathf.InverseLerp(pressureStartThreshold, 1f, trigger);
             return baseRadius * Mathf.Lerp(minPressureFraction, 1f, p);
         }
 
